@@ -29,15 +29,31 @@ git diff --stat
 `gas/.clasp.json` が存在する場合に実行する。
 
 ```bash
-# GAS プロジェクトディレクトリに移動してプッシュ
-cd gas && clasp push
+# GAS ディレクトリで clasp push（PowerShell では && 不可なので別コマンドで実行）
+clasp push
+# Cwd: gas/
 
-# 新しいバージョンとしてデプロイ
-clasp deploy --description "自動デプロイ: YYYY-MM-DD HH:MM"
+# 既存デプロイIDを取得して、同じIDで上書きデプロイ
+clasp deployments
+# Cwd: gas/
 ```
 
+**⚠️ 重要: 既存デプロイIDの上書き更新**
+
+`clasp deploy` を引数なしで実行すると**毎回新しいデプロイIDが生成**され、PWA の API URL が壊れる。
+必ず `-i` オプションで既存デプロイIDを指定して上書きすること：
+
+```bash
+# 既存デプロイIDを上書き更新（URLが変わらない）
+clasp deploy -i <DEPLOYMENT_ID> --description "自動デプロイ: YYYY-MM-DD HH:MM"
+# Cwd: gas/
+```
+
+- `<DEPLOYMENT_ID>` は `clasp deployments` の出力から、`@HEAD` 以外の**本番用デプロイID**を使用する
+- 本番デプロイIDは `src/api.ts` の `GAS_WEB_APP_URL` に含まれるIDと一致するものを選ぶ
+
 **デプロイID管理:**
-- `clasp deploy` の実行結果からデプロイID とバージョン番号を取得する
+- `clasp deploy -i` の実行結果からバージョン番号を確認する
 - 取得した情報を `ChatLog/` の当日のログファイルに「デプロイ情報」セクションとして記録する
 - 過去のデプロイIDの一覧は `clasp deployments` で確認可能
 

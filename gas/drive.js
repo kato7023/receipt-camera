@@ -11,12 +11,7 @@
  * @param timestamp タイムスタンプ（ファイル名用）
  * @returns Drive ファイル ID
  */
-function saveImageToDrive(
-  imageBase64: string,
-  mimeType: string,
-  companyName: string,
-  timestamp: string
-): string {
+function saveImageToDrive(imageBase64, mimeType, companyName, timestamp) {
   const rootFolder = DriveApp.getFolderById(DRIVE_ROOT_FOLDER_ID);
 
   // フォルダ構造: 領収書/[会社名]/[YYYY-MM]/
@@ -45,10 +40,7 @@ function saveImageToDrive(
 /**
  * フォルダが存在すれば取得、なければ作成
  */
-function getOrCreateFolder(
-  parent: GoogleAppsScript.Drive.Folder,
-  name: string
-): GoogleAppsScript.Drive.Folder {
+function getOrCreateFolder(parent, name) {
   const folders = parent.getFoldersByName(name);
   if (folders.hasNext()) {
     return folders.next();
