@@ -8,6 +8,34 @@
  */
 
 /**
+ * 安全なAPIエンドポイントのホワイトリスト
+ * ここにないエンドポイントへの POST/PUT/DELETE は拒否される
+ */
+var ALLOWED_POST_ENDPOINTS = ['receipts', 'expense_applications'];
+
+/**
+ * Freee API リクエストの安全性を検証
+ * DELETE/PUT は全面禁止、POST はホワイトリストのみ許可
+ */
+function validateFreeeRequest(method, endpoint) {
+  method = method.toUpperCase();
+  
+  if (method === 'DELETE') {
+    throw new Error('🔴 安全保護: Freee API への DELETE リクエストは禁止されています');
+  }
+  
+  if (method === 'PUT') {
+    throw new Error('🔴 安全保護: Freee API への PUT リクエストは禁止されています');
+  }
+  
+  if (method === 'POST' && ALLOWED_POST_ENDPOINTS.indexOf(endpoint) === -1) {
+    throw new Error('🔴 安全保護: エンドポイント "' + endpoint + '" への POST は許可されていません。許可リスト: ' + ALLOWED_POST_ENDPOINTS.join(', '));
+  }
+  
+  return true;
+}
+
+/**
  * 証憑（領収書画像）を Freee にアップロード
  * @param {string} driveFileId Google Drive のファイル ID
  * @param {number} companyId Freee の事業所 ID
@@ -19,6 +47,7 @@ function uploadReceiptToFreee(driveFileId, companyId) {
   const blob = file.getBlob();
 
   // freeeAPIv2 の Request クラスで証憑アップロード（multipart/form-data）
+  validateFreeeRequest('POST', 'receipts');
   const req = new FreeeAPI.Request('receipts');
   const response = req.request___POST({
     'company_id': String(companyId),
@@ -54,6 +83,7 @@ function createExpenseDraft(companyId, receiptId, paymentMethodName, memo, captu
     ],
   };
 
+  validateFreeeRequest('POST', 'expense_applications');
   const req = new FreeeAPI.Request('expense_applications');
   const response = req.request___POST(payload);
 
@@ -88,6 +118,7 @@ function createGroupExpenseDraft(companyId, receiptIds, paymentMethodName, group
     expense_application_lines: lines,
   };
 
+  validateFreeeRequest('POST', 'expense_applications');
   const req = new FreeeAPI.Request('expense_applications');
   const response = req.request___POST(payload);
 
