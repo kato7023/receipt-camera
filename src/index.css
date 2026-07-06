@@ -962,7 +962,7 @@ body {
   background: var(--bg-secondary);
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   padding: var(--space-lg);
-  padding-bottom: calc(var(--safe-bottom) + var(--space-lg));
+  padding-bottom: calc(var(--safe-bottom) + var(--space-lg) + 56px);
   overflow-y: auto;
   animation: slideUp var(--transition-normal) ease-out;
 }
