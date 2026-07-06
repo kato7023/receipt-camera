@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { saveReceipt } from '../db';
+import { saveReceipt, getExistingGroupNames } from '../db';
 import type { Company, PaymentMethod } from '../db';
 import { getCachedCompanies, getCachedPaymentMethods } from '../api';
 import PaymentMethodPicker from './PaymentMethodPicker';
@@ -24,6 +24,10 @@ export default function CameraView({ onCapture }: CameraViewProps) {
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [showCompanySelector, setShowCompanySelector] = useState(false);
 
+  // グループ選択（任意）
+  const [existingGroups, setExistingGroups] = useState<string[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+
   // マスタデータ読み込み
   useEffect(() => {
     getCachedPaymentMethods().then((methods) => {
@@ -34,6 +38,13 @@ export default function CameraView({ onCapture }: CameraViewProps) {
       if (defaultMethod) setSelectedPayment(defaultMethod);
     });
     getCachedCompanies().then(setCompanies);
+    loadExistingGroups();
+  }, []);
+
+  // グループ名一覧を読み込み
+  const loadExistingGroups = useCallback(async () => {
+    const groups = await getExistingGroupNames();
+    setExistingGroups(groups);
   }, []);
 
   // 会社選択時に支払い方法をフィルター
@@ -66,6 +77,11 @@ export default function CameraView({ onCapture }: CameraViewProps) {
     }
   }, [selectedPayment, paymentMethods]);
 
+  // グループ選択
+  const handleGroupSelect = useCallback((groupName: string | null) => {
+    setSelectedGroup(prev => prev === groupName ? null : groupName);
+  }, []);
+
   const handleCapture = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -78,7 +94,8 @@ export default function CameraView({ onCapture }: CameraViewProps) {
           selectedPayment.id,
           selectedPayment.name,
           selectedCompany?.id || null,
-          selectedCompany?.name || null
+          selectedCompany?.name || null,
+          selectedGroup
         );
         setCaptureCount((prev) => prev + 1);
 
@@ -89,6 +106,8 @@ export default function CameraView({ onCapture }: CameraViewProps) {
           URL.revokeObjectURL(url);
         }, 2000);
 
+        // グループ一覧を更新（新しいグループが追加された可能性）
+        loadExistingGroups();
         onCapture();
       } catch (err) {
         console.error('保存に失敗しました:', err);
@@ -98,7 +117,7 @@ export default function CameraView({ onCapture }: CameraViewProps) {
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     },
-    [onCapture, selectedPayment, selectedCompany]
+    [onCapture, selectedPayment, selectedCompany, selectedGroup, loadExistingGroups]
   );
 
   const triggerCapture = () => fileInputRef.current?.click();
@@ -140,6 +159,29 @@ export default function CameraView({ onCapture }: CameraViewProps) {
           onSelect={handlePaymentSelect}
         />
 
+        {/* グループ選択（既存グループがある場合のみ表示） */}
+        {existingGroups.length > 0 && (
+          <div className="group-picker">
+            <div className="group-picker-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+              <span>グループ</span>
+            </div>
+            <div className="group-buttons">
+              {existingGroups.map((name) => (
+                <button
+                  key={name}
+                  className={`group-button ${selectedGroup === name ? 'active' : ''}`}
+                  onClick={() => handleGroupSelect(name)}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ステータス表示 */}
         {captureCount > 0 && (
           <div className="capture-badge">
@@ -155,7 +197,7 @@ export default function CameraView({ onCapture }: CameraViewProps) {
               <img src={lastCaptured} alt="撮影した領収書" className="capture-preview-img" />
               <div className="capture-success-overlay">
                 <span className="capture-success-check">✓</span>
-                <span>保存しました</span>
+                <span>保存しました{selectedGroup ? ` → ${selectedGroup}` : ''}</span>
               </div>
             </div>
           ) : (

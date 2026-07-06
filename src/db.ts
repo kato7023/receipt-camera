@@ -107,7 +107,8 @@ export async function saveReceipt(
   paymentMethodId: string,
   paymentMethodName: string,
   companyId: string | null = null,
-  companyName: string | null = null
+  companyName: string | null = null,
+  groupName: string | null = null
 ): Promise<number> {
   const thumbnail = await createThumbnail(imageBlob);
   const id = await db.receipts.add({
@@ -118,7 +119,7 @@ export async function saveReceipt(
     paymentMethodName,
     companyId,
     companyName,
-    groupName: null,
+    groupName,
     uploadStatus: 'pending',
     uploadError: null,
     uploadedAt: null,
