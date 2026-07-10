@@ -115,7 +115,7 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
       } catch {
         // ストレージ情報取得に失敗しても無視
       }
-      alert(`会社の割り当てに失敗しました。\n\n[${name}] ${message}${storageInfo}`);
+      alert(`会社の割り当てに失敗しました。(v${__APP_VERSION__})\n\n[${name}] ${message}${storageInfo}`);
     } finally {
       setShowCompanyAssigner(false);
       setSelectedIds(new Set());

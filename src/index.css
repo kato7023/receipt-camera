@@ -123,6 +123,16 @@ body {
   color: var(--accent-amber);
 }
 
+.app-version {
+  position: absolute;
+  right: var(--space-md);
+  bottom: 2px;
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  opacity: 0.6;
+  font-family: monospace;
+}
+
 .app-logo h1 {
   font-size: 1.125rem;
   font-weight: 600;
