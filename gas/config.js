@@ -107,6 +107,33 @@ function getPaymentMethods() {
 }
 
 /**
+ * 指定した事業所で利用可能な経費科目テンプレート一覧を取得する（キャッシュ付き、会社ごと）
+ */
+function getExpenseApplicationLineTemplates(freeeCompanyId) {
+  return getCachedOrFetch('CACHE_EXPENSE_TEMPLATES_' + freeeCompanyId, function() {
+    const req = new FreeeAPI.Request('expense_application_line_templates').addParam('company_id', freeeCompanyId);
+    const response = req.requestGET();
+    return (response && response.expense_application_line_templates) || [];
+  });
+}
+
+/**
+ * 経費申請作成時にデフォルトで使う経費科目テンプレートIDを取得する。
+ *
+ * このアプリには撮影時に経費科目(勘定科目)を選択するUIがまだ無いため、
+ * 汎用的に使える「消耗品費」系のテンプレートを優先的に採用し、
+ * 無ければ先頭のテンプレートにフォールバックする（暫定対応）。
+ * @returns {number|null} テンプレートID。テンプレートが1件も無ければ null
+ */
+function getDefaultExpenseApplicationLineTemplateId(freeeCompanyId) {
+  const templates = getExpenseApplicationLineTemplates(freeeCompanyId);
+  if (!templates.length) return null;
+
+  const fallback = templates.find(function(t) { return t.name && t.name.indexOf('消耗品') !== -1; });
+  return (fallback || templates[0]).id;
+}
+
+/**
  * マスタキャッシュを手動リフレッシュ
  * スプレッドシートでマスタデータを変更した後に実行してください
  * GAS エディタで「refreshMasterCache」を選択して ▶ 実行

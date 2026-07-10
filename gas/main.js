@@ -467,3 +467,25 @@ function fetchAndWriteFreeeCompanies() {
     Logger.log('OAuth認証が必要な場合は、freeeAPIv2 プロジェクトで alertAuth() を実行してください');
   }
 }
+
+/**
+ * 「開発用テスト事業所」で利用可能な経費科目テンプレート一覧を取得する（診断用・読み取り専用GET）
+ * 経費申請作成(expense_applications)が「Purchase linesを入力してください」で失敗する原因が
+ * expense_application_line_template_id（経費科目）の未指定である可能性を確認するために使用する。
+ * GAS エディタで「listExpenseApplicationLineTemplates」を選択して ▶ 実行
+ */
+function listExpenseApplicationLineTemplates() {
+  const companies = getCompanies();
+  const target = companies.find(function(c) { return c.name.indexOf('開発用テスト事業所') !== -1 && c.name.indexOf('削除') === -1; });
+  if (!target) {
+    Logger.log('❌ 「開発用テスト事業所」が会社マスタに見つかりません');
+    return;
+  }
+  Logger.log('対象事業所: ' + target.name + ' (freeeCompanyId: ' + target.freeeCompanyId + ')');
+
+  const req = new FreeeAPI.Request('expense_application_line_templates').addParam('company_id', target.freeeCompanyId);
+  const response = req.requestGET();
+
+  Logger.log('--- expense_application_line_templates ---');
+  Logger.log(JSON.stringify(response, null, 2));
+}
