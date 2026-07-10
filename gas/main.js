@@ -271,16 +271,17 @@ function setupMasterSheets() {
   if (!companySheet) {
     companySheet = ss.insertSheet('会社マスタ');
     // ヘッダー
-    companySheet.appendRow(['会社ID', '会社名', 'Freee事業所ID', '有効']);
+    companySheet.appendRow(['会社ID', '会社名', 'Freee事業所ID', '有効', 'メインボタン']);
     // ヘッダー行を太字に
-    companySheet.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
+    companySheet.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
     // 列幅調整
     companySheet.setColumnWidth(1, 100);
     companySheet.setColumnWidth(2, 200);
     companySheet.setColumnWidth(3, 150);
     companySheet.setColumnWidth(4, 80);
+    companySheet.setColumnWidth(5, 100);
     // 説明行
-    companySheet.appendRow(['c001', '（会社名を入力）', '（FreeeのURLから取得）', 'TRUE']);
+    companySheet.appendRow(['c001', '（会社名を入力）', '（FreeeのURLから取得）', 'TRUE', 'TRUE']);
     Logger.log('✅ 会社マスタシートを作成しました');
   } else {
     Logger.log('ℹ️ 会社マスタシートは既に存在します');
@@ -408,6 +409,54 @@ function inspectFreeeAPI() {
   } else {
     Logger.log('--- 検出されたメソッド: ' + found.join(', '));
   }
+}
+
+/**
+ * 既存の会社マスタシートに「メインボタン」列（E列）を追加する。
+ * 既にE列にヘッダーがある場合はヘッダー追加をスキップする（何度実行しても安全）。
+ * 会社名に MAJOR_KEYWORDS のいずれかを含む場合は TRUE、それ以外は FALSE を設定する
+ * （既にE列に値が入っている行はスキップし、上書きしない）。
+ * GAS エディタで「addCompanyMajorColumn」を選択して ▶ 実行し、
+ * 完了後に「refreshMasterCache」も実行してキャッシュを更新してください。
+ */
+function addCompanyMajorColumn() {
+  const MAJOR_KEYWORDS = ['三国産業', 'ファンテック', '三国ホールディングス'];
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName('会社マスタ');
+  if (!sheet) {
+    Logger.log('❌ 会社マスタシートが見つかりません');
+    return;
+  }
+
+  // ヘッダー追加
+  const header = sheet.getRange(1, 5).getValue();
+  if (!header) {
+    sheet.getRange(1, 5).setValue('メインボタン').setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
+    sheet.setColumnWidth(5, 100);
+    Logger.log('✅ ヘッダー「メインボタン」を追加しました');
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    Logger.log('ℹ️ 会社データがありません');
+    return;
+  }
+
+  const data = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  let updated = 0;
+  for (let i = 0; i < data.length; i++) {
+    const name = String(data[i][1] || '');
+    const existing = data[i][4];
+    if (existing === '' || existing === null || existing === undefined) {
+      const isMajor = MAJOR_KEYWORDS.some(function(k) { return name.indexOf(k) !== -1; });
+      sheet.getRange(i + 2, 5).setValue(isMajor);
+      Logger.log('  ' + name + ' → ' + (isMajor ? 'メインボタン' : 'その他'));
+      updated++;
+    }
+  }
+
+  Logger.log('🎉 ' + updated + '件を更新しました。続けて refreshMasterCache() を実行してください。');
 }
 
 /**

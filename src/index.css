@@ -224,47 +224,40 @@ body {
   min-height: 0;
 }
 
-/* Company Selector Button */
-.company-selector-button {
+/* ---------- Picker Section (会社選択 / 支払い選択 共通) ---------- */
+.picker-section {
+  width: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-xs) var(--space-md);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-medium);
-  border-radius: var(--radius-xl);
-  color: var(--text-secondary);
-  font-family: var(--font-family);
-  font-size: 0.8125rem;
+  gap: 4px;
+}
+
+.picker-section-title {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
   font-weight: 500;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  -webkit-tap-highlight-color: transparent;
 }
 
-.company-selector-button.selected {
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
-  background: var(--accent-blue-subtle);
+.picker-divider {
+  width: 100%;
+  max-width: 280px;
+  height: 1px;
+  background: var(--border-subtle);
 }
 
-.company-selector-button:active {
-  transform: scale(0.97);
-}
-
-/* ---------- Payment Method Picker ---------- */
-.payment-picker {
+.picker {
   width: 100%;
 }
 
-.payment-buttons {
+.picker-buttons {
   display: flex;
   gap: var(--space-xs);
   justify-content: center;
   flex-wrap: wrap;
 }
 
-.payment-button {
+.picker-button {
   padding: var(--space-xs) var(--space-md);
   background: var(--bg-surface);
   border: 1px solid var(--border-medium);
@@ -279,28 +272,28 @@ body {
   white-space: nowrap;
 }
 
-.payment-button.active {
+.picker-button.active {
   background: var(--accent-amber-subtle);
   border-color: var(--accent-amber);
   color: var(--accent-amber);
   box-shadow: 0 0 12px var(--accent-amber-glow);
 }
 
-.payment-button:active {
+.picker-button:active {
   transform: scale(0.95);
 }
 
-.payment-other {
+.picker-other {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.payment-dropdown-container {
+.picker-dropdown-container {
   position: relative;
 }
 
-.payment-dropdown {
+.picker-dropdown {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
@@ -314,7 +307,7 @@ body {
   animation: fadeIn var(--transition-fast) ease-out;
 }
 
-.payment-dropdown-item {
+.picker-dropdown-item {
   display: block;
   width: 100%;
   padding: var(--space-sm) var(--space-md);
@@ -329,8 +322,8 @@ body {
   transition: background var(--transition-fast);
 }
 
-.payment-dropdown-item:hover,
-.payment-dropdown-item.active {
+.picker-dropdown-item:hover,
+.picker-dropdown-item.active {
   background: var(--accent-amber-subtle);
   color: var(--accent-amber);
 }
@@ -407,7 +400,7 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Camera Preview */
+/* Camera Preview（タップで撮影するボタンとして機能） */
 .camera-preview-area {
   width: 100%;
   max-width: 280px;
@@ -416,6 +409,23 @@ body {
   border-radius: var(--radius-lg);
   overflow: hidden;
   position: relative;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.camera-preview-area:active .camera-icon-area {
+  transform: scale(0.98);
+  background: var(--bg-elevated);
+}
+
+.camera-preview-area:disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .camera-icon-area {
@@ -425,6 +435,7 @@ body {
   justify-content: center;
   height: 100%;
   gap: var(--space-md);
+  transition: all var(--transition-fast);
   background: var(--bg-surface);
   border: 2px dashed var(--border-medium);
   border-radius: var(--radius-lg);
@@ -490,58 +501,36 @@ body {
   font-weight: 700;
 }
 
-/* Shutter Button */
-.shutter-button {
-  width: 72px;
-  height: 72px;
-  border-radius: var(--radius-full);
-  border: 3px solid var(--accent-amber);
-  background: transparent;
-  padding: 4px;
-  cursor: pointer;
-  transition: all var(--transition-normal);
-  -webkit-tap-highlight-color: transparent;
-  position: relative;
-}
-
-.shutter-button::before {
-  content: '';
-  position: absolute;
-  inset: -8px;
-  border-radius: var(--radius-full);
-  background: var(--accent-amber-glow);
-  opacity: 0;
-  transition: opacity var(--transition-normal);
-}
-
-.shutter-button:hover::before,
-.shutter-button:focus-visible::before {
-  opacity: 1;
-}
-
-.shutter-button:active {
-  transform: scale(0.9);
-}
-
-.shutter-button:active .shutter-button-inner {
-  transform: scale(0.85);
-}
-
-.shutter-button.processing {
-  border-color: var(--text-tertiary);
-  pointer-events: none;
-}
-
-.shutter-button-inner {
-  width: 100%;
-  height: 100%;
-  border-radius: var(--radius-full);
-  background: linear-gradient(135deg, var(--accent-amber), #E8941F);
+/* Album Button */
+.album-button {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
-  transition: transform var(--transition-fast);
+  gap: var(--space-sm);
+  width: 100%;
+  max-width: 280px;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-xl);
+  color: var(--text-secondary);
+  font-family: var(--font-family);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+
+.album-button:active {
+  transform: scale(0.97);
+  background: var(--bg-elevated);
+}
+
+.album-button:disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .shutter-spinner {

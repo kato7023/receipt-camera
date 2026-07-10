@@ -2,27 +2,28 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { saveReceipt, getExistingGroupNames } from '../db';
 import type { Company, PaymentMethod } from '../db';
 import { getCachedCompanies, getCachedPaymentMethods } from '../api';
-import PaymentMethodPicker from './PaymentMethodPicker';
-import CompanyAssigner from './CompanyAssigner';
+import ButtonPicker from './ButtonPicker';
 
 interface CameraViewProps {
   onCapture: () => void;
 }
 
+const UNSET_COMPANY: Company = { id: '', name: '未選択', freeeCompanyId: 0, isMajor: false };
+
 export default function CameraView({ onCapture }: CameraViewProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastCaptured, setLastCaptured] = useState<string | null>(null);
   const [captureCount, setCaptureCount] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const albumInputRef = useRef<HTMLInputElement>(null);
 
   // 支払い方法
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [selectedPayment, setSelectedPayment] = useState<PaymentMethod | null>(null);
-  
+
   // 会社選択（任意）
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
-  const [showCompanySelector, setShowCompanySelector] = useState(false);
 
   // グループ選択（任意）
   const [existingGroups, setExistingGroups] = useState<string[]>([]);
@@ -64,9 +65,9 @@ export default function CameraView({ onCapture }: CameraViewProps) {
   }, [companies]);
 
   // 会社選択時に支払い方法を確認
-  const handleCompanySelect = useCallback((company: Company | null) => {
+  const handleCompanySelect = useCallback((item: Company) => {
+    const company = item.id === '' ? null : item;
     setSelectedCompany(company);
-    setShowCompanySelector(false);
     // 選択中の支払い方法がその会社で使えない場合、現金にリセット
     if (company && selectedPayment) {
       const isValid = selectedPayment.companyId === null || selectedPayment.companyId === company.id;
@@ -114,18 +115,20 @@ export default function CameraView({ onCapture }: CameraViewProps) {
         alert('保存に失敗しました。もう一度お試しください。');
       } finally {
         setIsProcessing(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
+        if (cameraInputRef.current) cameraInputRef.current.value = '';
+        if (albumInputRef.current) albumInputRef.current.value = '';
       }
     },
     [onCapture, selectedPayment, selectedCompany, selectedGroup, loadExistingGroups]
   );
 
-  const triggerCapture = () => fileInputRef.current?.click();
+  const triggerCameraCapture = () => cameraInputRef.current?.click();
+  const triggerAlbumPick = () => albumInputRef.current?.click();
 
   return (
     <div className="camera-view">
       <input
-        ref={fileInputRef}
+        ref={cameraInputRef}
         type="file"
         accept="image/*"
         capture="environment"
@@ -133,31 +136,37 @@ export default function CameraView({ onCapture }: CameraViewProps) {
         className="camera-input-hidden"
         id="camera-input"
       />
+      <input
+        ref={albumInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleCapture}
+        className="camera-input-hidden"
+        id="album-input"
+      />
 
       <div className="camera-content">
-        {/* 会社選択（任意） */}
-        <button
-          className={`company-selector-button ${selectedCompany ? 'selected' : ''}`}
-          onClick={() => setShowCompanySelector(true)}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 21h18" />
-            <path d="M5 21V7l8-4v18" />
-            <path d="M19 21V11l-6-4" />
-            <path d="M9 9h1" />
-            <path d="M9 13h1" />
-            <path d="M9 17h1" />
-          </svg>
-          <span>{selectedCompany ? selectedCompany.name : '会社未選択'}</span>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
-        </button>
+        {/* 会社選択 */}
+        <div className="picker-section">
+          <span className="picker-section-title">会社選択</span>
+          <ButtonPicker
+            items={[UNSET_COMPANY, ...companies]}
+            selected={selectedCompany ?? UNSET_COMPANY}
+            onSelect={handleCompanySelect}
+          />
+        </div>
 
-        {/* 支払い方法ボタン群 */}
-        <PaymentMethodPicker
-          methods={filteredPaymentMethods}
-          selected={selectedPayment}
-          onSelect={handlePaymentSelect}
-        />
+        <div className="picker-divider" />
+
+        {/* 支払い方法選択 */}
+        <div className="picker-section">
+          <span className="picker-section-title">支払い選択</span>
+          <ButtonPicker
+            items={filteredPaymentMethods}
+            selected={selectedPayment}
+            onSelect={handlePaymentSelect}
+          />
+        </div>
 
         {/* グループ選択（既存グループがある場合のみ表示） */}
         {existingGroups.length > 0 && (
@@ -190,8 +199,13 @@ export default function CameraView({ onCapture }: CameraViewProps) {
           </div>
         )}
 
-        {/* プレビュー or アイコン */}
-        <div className="camera-preview-area">
+        {/* 撮影エリア（タップで撮影） / プレビュー */}
+        <button
+          className="camera-preview-area"
+          onClick={triggerCameraCapture}
+          disabled={isProcessing || !selectedPayment}
+          aria-label="撮影"
+        >
           {lastCaptured ? (
             <div className="capture-success">
               <img src={lastCaptured} alt="撮影した領収書" className="capture-preview-img" />
@@ -202,46 +216,38 @@ export default function CameraView({ onCapture }: CameraViewProps) {
             </div>
           ) : (
             <div className="camera-icon-area">
-              <div className="camera-icon">
-                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-                  <circle cx="12" cy="13" r="3" />
-                </svg>
-              </div>
-              <p className="camera-hint">タップして領収書を撮影</p>
+              {isProcessing ? (
+                <div className="shutter-spinner" />
+              ) : (
+                <>
+                  <div className="camera-icon">
+                    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+                      <circle cx="12" cy="13" r="3" />
+                    </svg>
+                  </div>
+                  <p className="camera-hint">タップして領収書を撮影</p>
+                </>
+              )}
             </div>
           )}
-        </div>
+        </button>
 
-        {/* シャッターボタン */}
+        {/* アルバムから選択ボタン */}
         <button
-          className={`shutter-button ${isProcessing ? 'processing' : ''}`}
-          onClick={triggerCapture}
+          className="album-button"
+          onClick={triggerAlbumPick}
           disabled={isProcessing || !selectedPayment}
-          aria-label="撮影"
+          aria-label="アルバムから選択"
         >
-          <div className="shutter-button-inner">
-            {isProcessing ? (
-              <div className="shutter-spinner" />
-            ) : (
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-                <circle cx="12" cy="13" r="3" fill="white" />
-              </svg>
-            )}
-          </div>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <polyline points="21 15 16 10 5 21" />
+          </svg>
+          <span>アルバムから選択</span>
         </button>
       </div>
-
-      {/* 会社選択モーダル */}
-      {showCompanySelector && (
-        <CompanyAssigner
-          companies={companies}
-          selected={selectedCompany}
-          onSelect={handleCompanySelect}
-          onClose={() => setShowCompanySelector(false)}
-        />
-      )}
     </div>
   );
 }
