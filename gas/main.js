@@ -102,13 +102,14 @@ function processSingleReceipt(index, item, companies) {
   }
 
   let driveFileId = '';
+  let freeeReceiptId = '';
 
   try {
     // Step 1: Drive に保存（最優先 — 画像保全）
     driveFileId = saveImageToDrive(item.imageBase64, item.mimeType, company.name, item.capturedAt);
 
     // Step 2: Freee に証憑アップロード
-    const freeeReceiptId = uploadReceiptToFreee(driveFileId, company.freeeCompanyId);
+    freeeReceiptId = uploadReceiptToFreee(driveFileId, company.freeeCompanyId);
 
     // Step 3: 経費精算下書き作成
     const freeeExpenseId = createExpenseDraft(
@@ -144,7 +145,7 @@ function processSingleReceipt(index, item, companies) {
       paymentMethod: item.paymentMethodName,
       groupName: '',
       driveFileId,
-      freeeReceiptId: '',
+      freeeReceiptId: String(freeeReceiptId),
       freeeExpenseId: '',
       status: 'error',
       error: message,

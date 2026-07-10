@@ -36,6 +36,41 @@ function validateFreeeRequest(method, endpoint) {
 }
 
 /**
+ * freeeAPIv2 の request___POST は失敗時、freeeからの実際のエラー本文を
+ * console.log に出力するだけで呼び出し元には null しか返さない
+ * （Stackdriver/Cloud Logging を見られないと原因が分からない）。
+ * そのため、ライブラリが公開している url/token ゲッターのみを利用して
+ * （ライブラリ自体は変更しない）独自にリクエストを行い、失敗時は
+ * freeeからのレスポンス本文をそのまま例外メッセージに含める。
+ * これによりスプレッドシートの「アップロードログ」にエラー詳細が残る。
+ */
+function postToFreeeWithDetail(endpoint, payload) {
+  const req = new FreeeAPI.Request(endpoint);
+  const url = req.url;
+  const token = req.token;
+
+  const response = UrlFetchApp.fetch(url, {
+    method: 'post',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      'accept': 'application/json',
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+
+  const status = response.getResponseCode();
+  const text = response.getContentText();
+
+  if (String(status).match(/2\d\d/) === null) {
+    throw new Error('Freee APIエラー (HTTP ' + status + ', ' + endpoint + '): ' + text);
+  }
+
+  return text ? JSON.parse(text) : null;
+}
+
+/**
  * 証憑（領収書画像）を Freee にアップロード
  * @param {string} driveFileId Google Drive のファイル ID
  * @param {number} companyId Freee の事業所 ID
@@ -46,19 +81,36 @@ function uploadReceiptToFreee(driveFileId, companyId) {
   const file = DriveApp.getFileById(driveFileId);
   const blob = file.getBlob();
 
-  // freeeAPIv2 の Request クラスで証憑アップロード（multipart/form-data）
   validateFreeeRequest('POST', 'receipts');
-  const req = new FreeeAPI.Request('receipts');
-  const response = req.request___POST({
-    'company_id': String(companyId),
-    'receipt': blob,
-  }, true); // binary = true でmultipart送信
 
-  if (!response || !response.receipt) {
-    throw new Error('Freee 証憑アップロードに失敗しました: ' + JSON.stringify(response));
+  const req = new FreeeAPI.Request('receipts');
+  const url = req.url;
+  const token = req.token;
+
+  // multipart/form-data（Content-Typeは指定せずUrlFetchAppにBlobから自動判定させる）
+  const response = UrlFetchApp.fetch(url, {
+    method: 'post',
+    headers: { 'Authorization': 'Bearer ' + token },
+    payload: {
+      'company_id': String(companyId),
+      'receipt': blob,
+    },
+    muteHttpExceptions: true,
+  });
+
+  const status = response.getResponseCode();
+  const text = response.getContentText();
+
+  if (String(status).match(/2\d\d/) === null) {
+    throw new Error('Freee APIエラー (HTTP ' + status + ', receipts): ' + text);
   }
 
-  return response.receipt.id;
+  const result = text ? JSON.parse(text) : null;
+  if (!result || !result.receipt) {
+    throw new Error('Freee 証憑アップロードに失敗しました: ' + JSON.stringify(result));
+  }
+
+  return result.receipt.id;
 }
 
 /**
@@ -84,8 +136,7 @@ function createExpenseDraft(companyId, receiptId, paymentMethodName, memo, captu
   };
 
   validateFreeeRequest('POST', 'expense_applications');
-  const req = new FreeeAPI.Request('expense_applications');
-  const response = req.request___POST(payload);
+  const response = postToFreeeWithDetail('expense_applications', payload);
 
   if (!response || !response.expense_application) {
     throw new Error('Freee 経費精算下書き作成に失敗しました: ' + JSON.stringify(response));
@@ -119,8 +170,7 @@ function createGroupExpenseDraft(companyId, receiptIds, paymentMethodName, group
   };
 
   validateFreeeRequest('POST', 'expense_applications');
-  const req = new FreeeAPI.Request('expense_applications');
-  const response = req.request___POST(payload);
+  const response = postToFreeeWithDetail('expense_applications', payload);
 
   if (!response || !response.expense_application) {
     throw new Error('Freee グループ経費精算下書き作成に失敗しました: ' + JSON.stringify(response));
