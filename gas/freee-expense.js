@@ -64,7 +64,7 @@ function postToFreeeWithDetail(endpoint, payload) {
   const text = response.getContentText();
 
   if (String(status).match(/2\d\d/) === null) {
-    throw new Error('Freee APIエラー (HTTP ' + status + ', ' + endpoint + '): ' + text);
+    throw new Error('Freee APIエラー (HTTP ' + status + ', ' + endpoint + '): ' + text + ' | 送信内容: ' + JSON.stringify(payload));
   }
 
   return text ? JSON.parse(text) : null;
