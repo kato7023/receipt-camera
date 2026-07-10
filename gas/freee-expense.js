@@ -126,19 +126,23 @@ function uploadReceiptToFreee(driveFileId, companyId) {
 function createExpenseDraft(companyId, receiptId, paymentMethodName, amount, memo, capturedAt) {
   const transactionDate = capturedAt.substring(0, 10);
   const templateId = getDefaultExpenseApplicationLineTemplateId(companyId);
-  const line = {
-    transaction_date: transactionDate,
-    description: memo || '領収書 (' + paymentMethodName + ')',
+  const expenseLine = {
     amount: amount > 0 ? amount : 1,
-    receipt_id: receiptId,
+    description: memo || '領収書 (' + paymentMethodName + ')',
   };
-  if (templateId) line.expense_application_line_template_id = templateId;
+  if (templateId) expenseLine.expense_application_line_template_id = templateId;
 
   const payload = {
     company_id: companyId,
     title: '領収書 (' + paymentMethodName + ') ' + transactionDate,
     issue_date: transactionDate,
-    expense_application_lines: [line],
+    purchase_lines: [
+      {
+        transaction_date: transactionDate,
+        receipt_id: receiptId,
+        expense_application_lines: [expenseLine],
+      }
+    ],
   };
 
   validateFreeeRequest('POST', 'expense_applications');
@@ -164,23 +168,25 @@ function createExpenseDraft(companyId, receiptId, paymentMethodName, amount, mem
 function createGroupExpenseDraft(companyId, receiptIds, amounts, paymentMethodName, groupName, capturedAt) {
   const transactionDate = capturedAt.substring(0, 10);
   const templateId = getDefaultExpenseApplicationLineTemplateId(companyId);
-  const lines = receiptIds.map(function(receiptId, index) {
+  const purchaseLines = receiptIds.map(function(receiptId, index) {
     const amount = amounts[index];
-    const line = {
-      transaction_date: transactionDate,
-      description: groupName + ' (' + (index + 1) + '/' + receiptIds.length + ')',
+    const expenseLine = {
       amount: amount > 0 ? amount : 1,
-      receipt_id: receiptId,
+      description: groupName + ' (' + (index + 1) + '/' + receiptIds.length + ')',
     };
-    if (templateId) line.expense_application_line_template_id = templateId;
-    return line;
+    if (templateId) expenseLine.expense_application_line_template_id = templateId;
+    return {
+      transaction_date: transactionDate,
+      receipt_id: receiptId,
+      expense_application_lines: [expenseLine],
+    };
   });
 
   const payload = {
     company_id: companyId,
     title: groupName + ' (' + paymentMethodName + ') ' + transactionDate,
     issue_date: transactionDate,
-    expense_application_lines: lines,
+    purchase_lines: purchaseLines,
   };
 
   validateFreeeRequest('POST', 'expense_applications');
