@@ -38,9 +38,19 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   const [groupInput, setGroupInput] = useState('');
 
   const groupInputRef = useRef<HTMLInputElement>(null);
-  const imageUrlRef = useRef<string>('');
 
-  // データの読み込み
+  // 画像URLは開いた時点の receipt.image から一度だけ生成する
+  // （メタ情報の編集のたびに IndexedDB から Blob を読み直すと、iOS Safari で
+  //   Blob が破損して読めなくなる既知の不具合があるため、DB再取得はしない）
+  useEffect(() => {
+    const url = URL.createObjectURL(receipt.image);
+    setImageUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [receipt.image]);
+
+  // メタ情報（会社・支払い方法・グループ・メモ等）の読み込み
   const loadReceiptData = useCallback(async () => {
     if (!receipt.id) return;
     const data = await db.receipts.get(receipt.id);
@@ -48,27 +58,12 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
       setCurrentReceipt(data);
       setMemo(data.memo || '');
       setGroupInput(data.groupName || '');
-
-      const newUrl = URL.createObjectURL(data.image);
-      const oldUrl = imageUrlRef.current;
-      imageUrlRef.current = newUrl;
-      setImageUrl(newUrl);
-      if (oldUrl) URL.revokeObjectURL(oldUrl);
     }
   }, [receipt.id]);
 
   useEffect(() => {
     loadReceiptData();
   }, [loadReceiptData]);
-
-  // アンマウント時のみ解放（更新時の解放は loadReceiptData 内で一元管理）
-  useEffect(() => {
-    return () => {
-      if (imageUrlRef.current) {
-        URL.revokeObjectURL(imageUrlRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     getCachedCompanies().then(setCompanies);
