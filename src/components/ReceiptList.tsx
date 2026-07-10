@@ -49,15 +49,26 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
     }
     setReceipts(filtered);
 
-    const urls = new Map<number, string>();
-    for (const receipt of filtered) {
-      if (receipt.id !== undefined) {
-        urls.set(receipt.id, URL.createObjectURL(receipt.thumbnail));
-      }
-    }
     setThumbnailUrls((prev) => {
-      prev.forEach((url) => URL.revokeObjectURL(url));
-      return urls;
+      const nextUrls = new Map<number, string>();
+      const prevCopy = new Map(prev);
+
+      for (const receipt of filtered) {
+        if (receipt.id !== undefined) {
+          if (prevCopy.has(receipt.id)) {
+            // 既存のオブジェクトURLを再利用
+            nextUrls.set(receipt.id, prevCopy.get(receipt.id)!);
+            prevCopy.delete(receipt.id); // 削除対象から除外
+          } else {
+            // 新規作成
+            nextUrls.set(receipt.id, URL.createObjectURL(receipt.thumbnail));
+          }
+        }
+      }
+
+      // 不要になったURLのみ解放
+      prevCopy.forEach((url) => URL.revokeObjectURL(url));
+      return nextUrls;
     });
   }, [filter]);
 
@@ -86,14 +97,31 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
 
   // 会社割当（選択中のレシートに会社を設定）
   const handleCompanyAssign = useCallback(async (company: Company | null) => {
-    if (!company) { setShowCompanyAssigner(false); return; }
-    for (const id of selectedIds) {
-      await updateReceiptCompany(id, company.id, company.name);
+    try {
+      if (company) {
+        // 並列で会社を設定
+        await Promise.all(
+          Array.from(selectedIds).map((id) =>
+            updateReceiptCompany(id, company.id, company.name)
+          )
+        );
+      } else {
+        // 並列で会社の設定を解除
+        await Promise.all(
+          Array.from(selectedIds).map((id) =>
+            db.receipts.update(id, { companyId: null, companyName: null })
+          )
+        );
+      }
+    } catch (err) {
+      console.error('会社割り当てに失敗しました:', err);
+      alert('会社の割り当てに失敗しました。時間をおいて再度お試しください。');
+    } finally {
+      setShowCompanyAssigner(false);
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      loadReceipts();
     }
-    setShowCompanyAssigner(false);
-    setSelectedIds(new Set());
-    setSelectMode(false);
-    loadReceipts();
   }, [selectedIds, loadReceipts]);
 
   // グループ化

@@ -175,6 +175,17 @@ export async function updateReceiptMemo(
 }
 
 /**
+ * 領収書の支払い方法を更新する
+ */
+export async function updateReceiptPaymentMethod(
+  id: number,
+  paymentMethodId: string,
+  paymentMethodName: string
+): Promise<void> {
+  await db.receipts.update(id, { paymentMethodId, paymentMethodName });
+}
+
+/**
  * 領収書を削除する
  */
 export async function deleteReceipt(id: number): Promise<void> {

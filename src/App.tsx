@@ -25,7 +25,6 @@ export default function App() {
 
   const handleUpdate = useCallback(() => {
     setRefreshKey((prev) => prev + 1);
-    setSelectedReceipt(null);
   }, []);
 
   return (
