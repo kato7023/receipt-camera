@@ -134,23 +134,37 @@ export async function saveReceipt(
  * Safari の IndexedDB には、DBから読み出した Blob をそのまま同じレコードに
  * 書き戻すと「Error preparing Blob/File data to be stored in object store」で
  * 失敗する既知の不具合がある（1回目は成功し、2回目以降失敗し続けるのが典型症状）。
- * 書き戻す直前に image/thumbnail を slice() で複製し「フレッシュな」Blobとして
- * 書き込むことでこれを回避する。
+ * slice() による複製では内部参照が引き継がれて回避できなかったため、
+ * arrayBuffer() でバイト列を実際に読み出し、完全に新しい Blob として
+ * 再構築してから書き込む（IDBの内部Blobハンドルから完全に切り離す）。
+ *
+ * Blob の読み出し(arrayBuffer)はIDBトランザクションと無関係な非同期処理のため、
+ * トランザクション内で await すると早期コミットのリスクがある。そのため
+ * 読み出し・複製はトランザクションの外で完了させ、put() だけをトランザクション内で行う。
  */
 async function updateReceiptFields(
   ids: number[],
   changes: Partial<Omit<Receipt, 'id' | 'image' | 'thumbnail'>>
 ): Promise<void> {
+  const prepared: Receipt[] = [];
+  for (const id of ids) {
+    const rec = await db.receipts.get(id);
+    if (!rec) continue;
+    const [imageBuf, thumbBuf] = await Promise.all([
+      rec.image.arrayBuffer(),
+      rec.thumbnail.arrayBuffer(),
+    ]);
+    prepared.push({
+      ...rec,
+      ...changes,
+      image: new Blob([imageBuf], { type: rec.image.type }),
+      thumbnail: new Blob([thumbBuf], { type: rec.thumbnail.type }),
+    });
+  }
+
   await db.transaction('rw', db.receipts, async () => {
-    for (const id of ids) {
-      const rec = await db.receipts.get(id);
-      if (!rec) continue;
-      await db.receipts.put({
-        ...rec,
-        ...changes,
-        image: rec.image.slice(0, rec.image.size, rec.image.type),
-        thumbnail: rec.thumbnail.slice(0, rec.thumbnail.size, rec.thumbnail.type),
-      });
+    for (const rec of prepared) {
+      await db.receipts.put(rec);
     }
   });
 }
