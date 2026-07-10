@@ -36,6 +36,7 @@ export interface Company {
   name: string;
   freeeCompanyId: number;
   isMajor: boolean; // ボタンに表示するか（false = 「その他」ドロップダウン）
+  shortName: string; // ボタン表示用の略称（未設定なら name を使う）
 }
 
 /**

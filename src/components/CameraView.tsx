@@ -8,7 +8,7 @@ interface CameraViewProps {
   onCapture: () => void;
 }
 
-const UNSET_COMPANY: Company = { id: '', name: '未選択', freeeCompanyId: 0, isMajor: false };
+const UNSET_COMPANY: Company = { id: '', name: '未選択', freeeCompanyId: 0, isMajor: false, shortName: '未選択' };
 
 export default function CameraView({ onCapture }: CameraViewProps) {
   const [isProcessing, setIsProcessing] = useState(false);

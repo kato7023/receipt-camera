@@ -4,6 +4,7 @@ interface PickerItem {
   id: string;
   name: string;
   isMajor: boolean;
+  shortName?: string;
 }
 
 interface ButtonPickerProps<T extends PickerItem> {
@@ -27,7 +28,7 @@ export default function ButtonPicker<T extends PickerItem>({ items, selected, on
             className={`picker-button ${selected?.id === item.id ? 'active' : ''}`}
             onClick={() => onSelect(item)}
           >
-            {item.name}
+            {item.shortName || item.name}
           </button>
         ))}
 
@@ -37,7 +38,10 @@ export default function ButtonPicker<T extends PickerItem>({ items, selected, on
               className={`picker-button picker-other ${otherItems.some((i) => i.id === selected?.id) ? 'active' : ''}`}
               onClick={() => setShowDropdown(!showDropdown)}
             >
-              {otherItems.find((i) => i.id === selected?.id)?.name || 'その他'}
+              {(() => {
+                const activeOther = otherItems.find((i) => i.id === selected?.id);
+                return activeOther ? (activeOther.shortName || activeOther.name) : 'その他';
+              })()}
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="6 9 12 15 18 9" />
               </svg>

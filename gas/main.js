@@ -271,17 +271,18 @@ function setupMasterSheets() {
   if (!companySheet) {
     companySheet = ss.insertSheet('会社マスタ');
     // ヘッダー
-    companySheet.appendRow(['会社ID', '会社名', 'Freee事業所ID', '有効', 'メインボタン']);
+    companySheet.appendRow(['会社ID', '会社名', 'Freee事業所ID', '有効', 'メインボタン', '略称']);
     // ヘッダー行を太字に
-    companySheet.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
+    companySheet.getRange(1, 1, 1, 6).setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
     // 列幅調整
     companySheet.setColumnWidth(1, 100);
     companySheet.setColumnWidth(2, 200);
     companySheet.setColumnWidth(3, 150);
     companySheet.setColumnWidth(4, 80);
     companySheet.setColumnWidth(5, 100);
+    companySheet.setColumnWidth(6, 80);
     // 説明行
-    companySheet.appendRow(['c001', '（会社名を入力）', '（FreeeのURLから取得）', 'TRUE', 'TRUE']);
+    companySheet.appendRow(['c001', '（会社名を入力）', '（FreeeのURLから取得）', 'TRUE', 'TRUE', '（略称）']);
     Logger.log('✅ 会社マスタシートを作成しました');
   } else {
     Logger.log('ℹ️ 会社マスタシートは既に存在します');
@@ -453,6 +454,68 @@ function addCompanyMajorColumn() {
       sheet.getRange(i + 2, 5).setValue(isMajor);
       Logger.log('  ' + name + ' → ' + (isMajor ? 'メインボタン' : 'その他'));
       updated++;
+    }
+  }
+
+  Logger.log('🎉 ' + updated + '件を更新しました。続けて refreshMasterCache() を実行してください。');
+}
+
+/**
+ * 既存の会社マスタシートに「略称」列（F列）を追加する。
+ * 既にF列にヘッダーがある場合はヘッダー追加をスキップする（何度実行しても安全）。
+ * 会社名が SHORT_NAME_MAP のキーワードを含む場合にその略称を設定する
+ * （既にF列に値が入っている行はスキップし、上書きしない）。
+ * キーワードは長い（より具体的な）ものを先に判定するよう順序に注意すること
+ * （例: 「開発用テスト事業所削除用」は「開発用テスト事業所」の判定より前に置く）。
+ * GAS エディタで「addCompanyShortNames」を選択して ▶ 実行し、
+ * 完了後に「refreshMasterCache」も実行してキャッシュを更新してください。
+ */
+function addCompanyShortNames() {
+  const SHORT_NAME_MAP = [
+    { keyword: '三国産業', shortName: '三国' },
+    { keyword: 'ファンテック', shortName: 'ファン' },
+    { keyword: '三国ホールディングス', shortName: 'ＨＤ' },
+    { keyword: 'DAチャレンジャーズ', shortName: 'ＤＡＣ' },
+    { keyword: '開発用テスト事業所削除用', shortName: '削除' },
+    { keyword: '開発用テスト事業所', shortName: '開発用' },
+    { keyword: 'TCI', shortName: 'ＴＣＩ' },
+  ];
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName('会社マスタ');
+  if (!sheet) {
+    Logger.log('❌ 会社マスタシートが見つかりません');
+    return;
+  }
+
+  // ヘッダー追加
+  const header = sheet.getRange(1, 6).getValue();
+  if (!header) {
+    sheet.getRange(1, 6).setValue('略称').setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
+    sheet.setColumnWidth(6, 80);
+    Logger.log('✅ ヘッダー「略称」を追加しました');
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    Logger.log('ℹ️ 会社データがありません');
+    return;
+  }
+
+  const data = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
+  let updated = 0;
+  for (let i = 0; i < data.length; i++) {
+    const name = String(data[i][1] || '');
+    const existing = data[i][5];
+    if (existing !== '' && existing !== null && existing !== undefined) continue;
+
+    const match = SHORT_NAME_MAP.find(function(m) { return name.indexOf(m.keyword) !== -1; });
+    if (match) {
+      sheet.getRange(i + 2, 6).setValue(match.shortName);
+      Logger.log('  ' + name + ' → ' + match.shortName);
+      updated++;
+    } else {
+      Logger.log('  ⚠️ ' + name + ' は略称マップに未登録のためスキップ');
     }
   }
 

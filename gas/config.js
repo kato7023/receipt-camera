@@ -69,6 +69,7 @@ function getCompanies() {
         freeeCompanyId: Number(row[2]),
         active: row[3] !== false && row[3] !== 'FALSE',
         isMajor: row[4] === true || row[4] === 'TRUE',
+        shortName: row[5] ? String(row[5]) : '',
       });
     }
 
