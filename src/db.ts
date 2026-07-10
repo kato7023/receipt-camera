@@ -129,6 +129,33 @@ export async function saveReceipt(
 }
 
 /**
+ * レコードのメタ情報を部分更新する内部ヘルパー。
+ *
+ * Safari の IndexedDB には、DBから読み出した Blob をそのまま同じレコードに
+ * 書き戻すと「Error preparing Blob/File data to be stored in object store」で
+ * 失敗する既知の不具合がある（1回目は成功し、2回目以降失敗し続けるのが典型症状）。
+ * 書き戻す直前に image/thumbnail を slice() で複製し「フレッシュな」Blobとして
+ * 書き込むことでこれを回避する。
+ */
+async function updateReceiptFields(
+  ids: number[],
+  changes: Partial<Omit<Receipt, 'id' | 'image' | 'thumbnail'>>
+): Promise<void> {
+  await db.transaction('rw', db.receipts, async () => {
+    for (const id of ids) {
+      const rec = await db.receipts.get(id);
+      if (!rec) continue;
+      await db.receipts.put({
+        ...rec,
+        ...changes,
+        image: rec.image.slice(0, rec.image.size, rec.image.type),
+        thumbnail: rec.thumbnail.slice(0, rec.thumbnail.size, rec.thumbnail.type),
+      });
+    }
+  });
+}
+
+/**
  * 領収書の会社を更新する
  */
 export async function updateReceiptCompany(
@@ -136,7 +163,18 @@ export async function updateReceiptCompany(
   companyId: string,
   companyName: string
 ): Promise<void> {
-  await db.receipts.update(id, { companyId, companyName });
+  await updateReceiptFields([id], { companyId, companyName });
+}
+
+/**
+ * 領収書の会社を一括更新する（複数選択時）
+ */
+export async function updateReceiptsCompany(
+  ids: number[],
+  companyId: string | null,
+  companyName: string | null
+): Promise<void> {
+  await updateReceiptFields(ids, { companyId, companyName });
 }
 
 /**
@@ -146,7 +184,7 @@ export async function updateReceiptGroup(
   ids: number[],
   groupName: string | null
 ): Promise<void> {
-  await db.receipts.where('id').anyOf(ids).modify({ groupName });
+  await updateReceiptFields(ids, { groupName });
 }
 
 /**
@@ -157,7 +195,7 @@ export async function updateUploadStatus(
   status: Receipt['uploadStatus'],
   error: string | null = null
 ): Promise<void> {
-  await db.receipts.update(id, {
+  await updateReceiptFields([id], {
     uploadStatus: status,
     uploadError: error,
     uploadedAt: status === 'completed' ? new Date() : null,
@@ -171,7 +209,7 @@ export async function updateReceiptMemo(
   id: number,
   memo: string
 ): Promise<void> {
-  await db.receipts.update(id, { memo });
+  await updateReceiptFields([id], { memo });
 }
 
 /**
@@ -182,7 +220,7 @@ export async function updateReceiptPaymentMethod(
   paymentMethodId: string,
   paymentMethodName: string
 ): Promise<void> {
-  await db.receipts.update(id, { paymentMethodId, paymentMethodName });
+  await updateReceiptFields([id], { paymentMethodId, paymentMethodName });
 }
 
 /**

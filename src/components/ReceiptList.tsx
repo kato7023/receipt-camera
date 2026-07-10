@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, updateReceiptGroup, updateUploadStatus, deleteReceipts } from '../db';
+import { db, updateReceiptGroup, updateReceiptsCompany, updateUploadStatus, deleteReceipts } from '../db';
 import type { Receipt, Company } from '../db';
 import { getCachedCompanies, uploadReceipts } from '../api';
 import CompanyAssigner from './CompanyAssigner';
@@ -99,12 +99,7 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
   const handleCompanyAssign = useCallback(async (company: Company | null) => {
     try {
       const ids = Array.from(selectedIds);
-      // 単一トランザクションで一括更新（iOS Safari のIndexedDBは並行トランザクションに弱いため）
-      if (company) {
-        await db.receipts.where('id').anyOf(ids).modify({ companyId: company.id, companyName: company.name });
-      } else {
-        await db.receipts.where('id').anyOf(ids).modify({ companyId: null, companyName: null });
-      }
+      await updateReceiptsCompany(ids, company?.id ?? null, company?.name ?? null);
     } catch (err) {
       console.error('会社割り当てに失敗しました:', err);
       const name = err instanceof DOMException ? err.name : (err as Error)?.name || 'UnknownError';

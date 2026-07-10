@@ -7,7 +7,7 @@ import {
   updateReceiptMemo,
   updateUploadStatus,
   deleteReceipt,
-  updateReceiptCompany,
+  updateReceiptsCompany,
   updateReceiptGroup,
   updateReceiptPaymentMethod
 } from '../db';
@@ -87,11 +87,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   // 会社選択
   const handleCompanySelect = useCallback(async (company: Company | null) => {
     if (!receipt.id) return;
-    if (company) {
-      await updateReceiptCompany(receipt.id, company.id, company.name);
-    } else {
-      await db.receipts.update(receipt.id, { companyId: null, companyName: null });
-    }
+    await updateReceiptsCompany([receipt.id], company?.id ?? null, company?.name ?? null);
     setShowCompanySelector(false);
     await loadReceiptData();
     onUpdate();
