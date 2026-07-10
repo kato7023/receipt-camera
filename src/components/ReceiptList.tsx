@@ -107,7 +107,20 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
       }
     } catch (err) {
       console.error('会社割り当てに失敗しました:', err);
-      alert('会社の割り当てに失敗しました。時間をおいて再度お試しください。');
+      const name = err instanceof DOMException ? err.name : (err as Error)?.name || 'UnknownError';
+      const message = (err as Error)?.message || String(err);
+      let storageInfo = '';
+      try {
+        if (navigator.storage?.estimate) {
+          const { usage, quota } = await navigator.storage.estimate();
+          const usageMB = ((usage || 0) / 1024 / 1024).toFixed(1);
+          const quotaMB = ((quota || 0) / 1024 / 1024).toFixed(1);
+          storageInfo = `\n\n使用容量: ${usageMB}MB / ${quotaMB}MB`;
+        }
+      } catch {
+        // ストレージ情報取得に失敗しても無視
+      }
+      alert(`会社の割り当てに失敗しました。\n\n[${name}] ${message}${storageInfo}`);
     } finally {
       setShowCompanyAssigner(false);
       setSelectedIds(new Set());
