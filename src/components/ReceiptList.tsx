@@ -133,18 +133,9 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
     loadReceipts();
   }, [selectedIds, loadReceipts]);
 
-  // アップロード
-  const handleUpload = useCallback(async () => {
-    // 会社未設定のレシートがあるか確認
-    const targetReceipts = receipts.filter(
-      r => r.id !== undefined && (selectedIds.size === 0 || selectedIds.has(r.id!)) && r.uploadStatus === 'pending'
-    );
-    const noCompany = targetReceipts.filter(r => !r.companyId);
-    if (noCompany.length > 0) {
-      alert(`会社未設定のレシートが ${noCompany.length} 枚あります。先に会社を設定してください。`);
-      return;
-    }
-    if (targetReceipts.length === 0) { alert('アップロード対象のレシートがありません。'); return; }
+  // 指定したレシートを実際にfreeeへアップロードする（新規アップロード・リトライ共通）
+  const performUpload = useCallback(async (targetReceipts: Receipt[]) => {
+    if (targetReceipts.length === 0) return;
 
     setIsUploading(true);
     try {
@@ -184,20 +175,33 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
       }
     } finally {
       setIsUploading(false);
-      setSelectedIds(new Set());
-      setSelectMode(false);
       loadReceipts();
     }
-  }, [receipts, selectedIds, loadReceipts]);
+  }, [loadReceipts]);
 
-  // リトライ（エラーのレシートをpendingに戻す）
+  // アップロード
+  const handleUpload = useCallback(async () => {
+    // 会社未設定のレシートがあるか確認
+    const targetReceipts = receipts.filter(
+      r => r.id !== undefined && (selectedIds.size === 0 || selectedIds.has(r.id!)) && r.uploadStatus === 'pending'
+    );
+    const noCompany = targetReceipts.filter(r => !r.companyId);
+    if (noCompany.length > 0) {
+      alert(`会社未設定のレシートが ${noCompany.length} 枚あります。先に会社を設定してください。`);
+      return;
+    }
+    if (targetReceipts.length === 0) { alert('アップロード対象のレシートがありません。'); return; }
+
+    await performUpload(targetReceipts);
+    setSelectedIds(new Set());
+    setSelectMode(false);
+  }, [receipts, selectedIds, performUpload]);
+
+  // リトライ（エラーのレシートを実際に再アップロードする）
   const handleRetry = useCallback(async () => {
     const errorReceipts = receipts.filter(r => r.id !== undefined && r.uploadStatus === 'error');
-    for (const r of errorReceipts) {
-      await updateUploadStatus(r.id!, 'pending');
-    }
-    loadReceipts();
-  }, [receipts, loadReceipts]);
+    await performUpload(errorReceipts);
+  }, [receipts, performUpload]);
 
   const handleBatchDelete = useCallback(async () => {
     if (selectedIds.size === 0) return;
@@ -250,7 +254,9 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
         </button>
         {selectMode && <button className="select-all-button" onClick={selectAll}>全選択</button>}
         {filter === 'error' && errorCount > 0 && !selectMode && (
-          <button className="retry-all-button" onClick={handleRetry}>全てリトライ</button>
+          <button className="retry-all-button" onClick={handleRetry} disabled={isUploading}>
+            {isUploading ? 'リトライ中...' : '全てリトライ'}
+          </button>
         )}
       </div>
 

@@ -11,7 +11,7 @@ import {
   updateReceiptGroup,
   updateReceiptPaymentMethod
 } from '../db';
-import { getCachedCompanies, getCachedPaymentMethods } from '../api';
+import { getCachedCompanies, getCachedPaymentMethods, uploadReceipts } from '../api';
 import CompanyAssigner from './CompanyAssigner';
 
 interface ReceiptDetailProps {
@@ -25,6 +25,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   const [imageUrl, setImageUrl] = useState<string>('');
   const [memo, setMemo] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // マスタデータ
@@ -119,11 +120,36 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   }, [currentReceipt?.groupName]);
 
   const handleRetry = useCallback(async () => {
-    if (!receipt.id) return;
-    await updateUploadStatus(receipt.id, 'pending');
-    await loadReceiptData();
-    onUpdate();
-  }, [receipt.id, loadReceiptData, onUpdate]);
+    if (!receipt.id || !currentReceipt) return;
+    setIsRetrying(true);
+    try {
+      await updateUploadStatus(receipt.id, 'uploading');
+      await loadReceiptData();
+
+      const results = await uploadReceipts([{
+        image: currentReceipt.image,
+        companyId: currentReceipt.companyId!,
+        paymentMethodId: currentReceipt.paymentMethodId,
+        paymentMethodName: currentReceipt.paymentMethodName,
+        groupName: currentReceipt.groupName,
+        memo: currentReceipt.memo,
+        capturedAt: currentReceipt.createdAt,
+      }]);
+
+      const result = results[0];
+      if (result?.status === 'completed') {
+        await updateUploadStatus(receipt.id, 'completed');
+      } else {
+        await updateUploadStatus(receipt.id, 'error', result?.error || 'アップロードに失敗しました');
+      }
+    } catch (err) {
+      await updateUploadStatus(receipt.id, 'error', (err as Error).message);
+    } finally {
+      setIsRetrying(false);
+      await loadReceiptData();
+      onUpdate();
+    }
+  }, [receipt.id, currentReceipt, loadReceiptData, onUpdate]);
 
   const handleDelete = useCallback(async () => {
     if (!receipt.id) return;
@@ -266,12 +292,12 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
         {currentReceipt.uploadStatus === 'error' && currentReceipt.uploadError && (
           <div className="detail-error">
             <span className="detail-error-text">エラー: {currentReceipt.uploadError}</span>
-            <button className="action-button retry-button" onClick={handleRetry}>
+            <button className="action-button retry-button" onClick={handleRetry} disabled={isRetrying}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="23 4 23 10 17 10" />
                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
               </svg>
-              リトライ
+              {isRetrying ? 'リトライ中...' : 'リトライ'}
             </button>
           </div>
         )}
