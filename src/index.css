@@ -246,6 +246,38 @@ body {
   background: var(--border-subtle);
 }
 
+/* ---------- 金額入力（Camera View） ---------- */
+.amount-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.amount-input {
+  width: 100%;
+  max-width: 220px;
+  text-align: center;
+  padding: var(--space-xs) var(--space-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-xl);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 0.8125rem;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.amount-input:focus {
+  outline: none;
+  border-color: var(--accent-amber);
+}
+
+.amount-input::placeholder {
+  color: var(--text-muted);
+}
+
 .picker {
   width: 100%;
 }
@@ -795,6 +827,12 @@ body {
 .receipt-date {
   font-size: 0.625rem;
   color: var(--text-secondary);
+}
+
+.receipt-amount {
+  font-size: 0.625rem;
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .receipt-payment {

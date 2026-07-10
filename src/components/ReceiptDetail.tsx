@@ -9,7 +9,8 @@ import {
   deleteReceipt,
   updateReceiptsCompany,
   updateReceiptGroup,
-  updateReceiptPaymentMethod
+  updateReceiptPaymentMethod,
+  updateReceiptAmount
 } from '../db';
 import { getCachedCompanies, getCachedPaymentMethods, uploadReceipts } from '../api';
 import CompanyAssigner from './CompanyAssigner';
@@ -37,8 +38,11 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   const [showPaymentSelector, setShowPaymentSelector] = useState(false);
   const [isEditingGroup, setIsEditingGroup] = useState(false);
   const [groupInput, setGroupInput] = useState('');
+  const [isEditingAmount, setIsEditingAmount] = useState(false);
+  const [amountInput, setAmountInput] = useState('');
 
   const groupInputRef = useRef<HTMLInputElement>(null);
+  const amountInputRef = useRef<HTMLInputElement>(null);
 
   // 画像URLは開いた時点の receipt.image から一度だけ生成する
   // （メタ情報の編集のたびに IndexedDB から Blob を読み直すと、iOS Safari で
@@ -59,6 +63,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
       setCurrentReceipt(data);
       setMemo(data.memo || '');
       setGroupInput(data.groupName || '');
+      setAmountInput(String(data.amount ?? 1));
     }
   }, [receipt.id]);
 
@@ -76,6 +81,13 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
       groupInputRef.current.focus();
     }
   }, [isEditingGroup]);
+
+  useEffect(() => {
+    if (isEditingAmount && amountInputRef.current) {
+      amountInputRef.current.focus();
+      amountInputRef.current.select();
+    }
+  }, [isEditingAmount]);
 
   // メモ保存
   const handleMemoSave = useCallback(async () => {
@@ -119,6 +131,22 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
     setIsEditingGroup(false);
   }, [currentReceipt?.groupName]);
 
+  // 金額保存
+  const handleAmountSave = useCallback(async () => {
+    if (!receipt.id) return;
+    const parsed = parseInt(amountInput, 10);
+    await updateReceiptAmount(receipt.id, Number.isFinite(parsed) ? parsed : 1);
+    setIsEditingAmount(false);
+    await loadReceiptData();
+    onUpdate();
+  }, [receipt.id, amountInput, loadReceiptData, onUpdate]);
+
+  // 金額編集キャンセル
+  const handleAmountCancel = useCallback(() => {
+    setAmountInput(String(currentReceipt?.amount ?? 1));
+    setIsEditingAmount(false);
+  }, [currentReceipt?.amount]);
+
   const handleRetry = useCallback(async () => {
     if (!receipt.id || !currentReceipt) return;
     setIsRetrying(true);
@@ -132,6 +160,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
         paymentMethodId: currentReceipt.paymentMethodId,
         paymentMethodName: currentReceipt.paymentMethodName,
         groupName: currentReceipt.groupName,
+        amount: currentReceipt.amount ?? 1,
         memo: currentReceipt.memo,
         capturedAt: currentReceipt.createdAt,
       }]);
@@ -261,6 +290,35 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
                 ) : (
                   <span className="detail-meta-value unassigned">グループ未設定</span>
                 )}
+                <svg className="edit-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
+              </div>
+            )}
+          </div>
+
+          {/* 金額 */}
+          <div className="detail-meta-item editable" onClick={() => !isEditingAmount && setIsEditingAmount(true)}>
+            <span className="detail-meta-label">金額</span>
+            {isEditingAmount ? (
+              <div className="detail-meta-input-container" onClick={(e) => e.stopPropagation()}>
+                <input
+                  ref={amountInputRef}
+                  type="number"
+                  inputMode="numeric"
+                  className="detail-group-input"
+                  value={amountInput}
+                  onChange={(e) => setAmountInput(e.target.value)}
+                  placeholder="金額を入力..."
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAmountSave();
+                    if (e.key === 'Escape') handleAmountCancel();
+                  }}
+                />
+                <button className="group-save-btn" onClick={handleAmountSave}>✓</button>
+                <button className="group-cancel-btn" onClick={handleAmountCancel}>×</button>
+              </div>
+            ) : (
+              <div className="detail-meta-value-container">
+                <span className="detail-meta-value">¥{(currentReceipt.amount ?? 1).toLocaleString()}</span>
                 <svg className="edit-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
               </div>
             )}

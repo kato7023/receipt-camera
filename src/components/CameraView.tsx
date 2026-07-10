@@ -29,6 +29,9 @@ export default function CameraView({ onCapture }: CameraViewProps) {
   const [existingGroups, setExistingGroups] = useState<string[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
 
+  // 金額（任意。未入力の場合は1円で登録 — freeeの経費申請作成に金額が必須のため）
+  const [amountInput, setAmountInput] = useState('');
+
   // マスタデータ読み込み
   useEffect(() => {
     getCachedPaymentMethods().then((methods) => {
@@ -90,15 +93,18 @@ export default function CameraView({ onCapture }: CameraViewProps) {
 
       setIsProcessing(true);
       try {
+        const amount = amountInput ? parseInt(amountInput, 10) : 1;
         await saveReceipt(
           file,
           selectedPayment.id,
           selectedPayment.name,
           selectedCompany?.id || null,
           selectedCompany?.name || null,
-          selectedGroup
+          selectedGroup,
+          Number.isFinite(amount) && amount > 0 ? amount : 1
         );
         setCaptureCount((prev) => prev + 1);
+        setAmountInput('');
 
         const url = URL.createObjectURL(file);
         setLastCaptured(url);
@@ -119,7 +125,7 @@ export default function CameraView({ onCapture }: CameraViewProps) {
         if (albumInputRef.current) albumInputRef.current.value = '';
       }
     },
-    [onCapture, selectedPayment, selectedCompany, selectedGroup, loadExistingGroups]
+    [onCapture, selectedPayment, selectedCompany, selectedGroup, amountInput, loadExistingGroups]
   );
 
   const triggerCameraCapture = () => cameraInputRef.current?.click();
@@ -165,6 +171,19 @@ export default function CameraView({ onCapture }: CameraViewProps) {
             items={filteredPaymentMethods}
             selected={selectedPayment}
             onSelect={handlePaymentSelect}
+          />
+        </div>
+
+        {/* 金額入力（任意・未入力なら1円で登録） */}
+        <div className="amount-section">
+          <span className="picker-section-title">金額</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            className="amount-input"
+            value={amountInput}
+            onChange={(e) => setAmountInput(e.target.value)}
+            placeholder="未入力の場合は1円で登録"
           />
         </div>
 

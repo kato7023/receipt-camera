@@ -20,6 +20,9 @@ export interface Receipt {
   // グループ化（整理ステップで設定）
   groupName: string | null;
 
+  // 金額（freeeの経費申請作成に必須。未入力の場合は1円で登録）
+  amount: number;
+
   // アップロード状態
   uploadStatus: 'pending' | 'uploading' | 'completed' | 'error';
   uploadError: string | null;
@@ -110,7 +113,8 @@ export async function saveReceipt(
   paymentMethodName: string,
   companyId: string | null = null,
   companyName: string | null = null,
-  groupName: string | null = null
+  groupName: string | null = null,
+  amount: number = 1
 ): Promise<number> {
   const thumbnail = await createThumbnail(imageBlob);
   const id = await db.receipts.add({
@@ -122,6 +126,7 @@ export async function saveReceipt(
     companyId,
     companyName,
     groupName,
+    amount: amount > 0 ? amount : 1,
     uploadStatus: 'pending',
     uploadError: null,
     uploadedAt: null,
@@ -226,6 +231,16 @@ export async function updateReceiptMemo(
   memo: string
 ): Promise<void> {
   await updateReceiptFields([id], { memo });
+}
+
+/**
+ * 領収書の金額を更新する（0以下は1円に丸める。freeeの経費申請作成には1以上が必須）
+ */
+export async function updateReceiptAmount(
+  id: number,
+  amount: number
+): Promise<void> {
+  await updateReceiptFields([id], { amount: amount > 0 ? amount : 1 });
 }
 
 /**

@@ -29,6 +29,7 @@ interface UploadReceiptItem {
   paymentMethodId: string;
   paymentMethodName: string;
   groupName: string | null;
+  amount: number;
   memo: string;
   capturedAt: string;
 }
@@ -121,6 +122,7 @@ export async function uploadReceipts(
     paymentMethodId: string;
     paymentMethodName: string;
     groupName: string | null;
+    amount: number;
     memo: string;
     capturedAt: Date;
   }[]
@@ -139,6 +141,7 @@ export async function uploadReceipts(
       paymentMethodId: item.paymentMethodId,
       paymentMethodName: item.paymentMethodName,
       groupName: item.groupName,
+      amount: item.amount > 0 ? item.amount : 1,
       memo: item.memo,
       capturedAt: item.capturedAt.toISOString(),
     }))

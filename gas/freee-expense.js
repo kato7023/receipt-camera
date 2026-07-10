@@ -118,18 +118,22 @@ function uploadReceiptToFreee(driveFileId, companyId) {
  * @param {number} companyId Freee の事業所 ID
  * @param {number} receiptId Freee の証憑 ID
  * @param {string} paymentMethodName 支払い方法名
+ * @param {number} amount 金額（freeeのバリデーション上、1以上が必須）
  * @param {string} memo メモ
  * @param {string} capturedAt 撮影日時 (ISO 8601)
  * @returns {number} 経費精算ID
  */
-function createExpenseDraft(companyId, receiptId, paymentMethodName, memo, capturedAt) {
+function createExpenseDraft(companyId, receiptId, paymentMethodName, amount, memo, capturedAt) {
+  const transactionDate = capturedAt.substring(0, 10);
   const payload = {
     company_id: companyId,
-    title: '領収書 (' + paymentMethodName + ') ' + capturedAt.substring(0, 10),
-    issue_date: capturedAt.substring(0, 10),
+    title: '領収書 (' + paymentMethodName + ') ' + transactionDate,
+    issue_date: transactionDate,
     expense_application_lines: [
       {
+        transaction_date: transactionDate,
         description: memo || '領収書 (' + paymentMethodName + ')',
+        amount: amount > 0 ? amount : 1,
         receipt_id: receiptId,
       }
     ],
@@ -149,23 +153,28 @@ function createExpenseDraft(companyId, receiptId, paymentMethodName, memo, captu
  * 経費精算の下書きを作成（グループ = N枚 → N明細を1経費精算に）
  * @param {number} companyId Freee の事業所 ID
  * @param {number[]} receiptIds Freee の証憑 ID の配列
+ * @param {number[]} amounts 金額の配列（receiptIdsと同じ順序・同じ長さ）
  * @param {string} paymentMethodName 支払い方法名
  * @param {string} groupName グループ名
  * @param {string} capturedAt 撮影日時 (ISO 8601)
  * @returns {number} 経費精算ID
  */
-function createGroupExpenseDraft(companyId, receiptIds, paymentMethodName, groupName, capturedAt) {
+function createGroupExpenseDraft(companyId, receiptIds, amounts, paymentMethodName, groupName, capturedAt) {
+  const transactionDate = capturedAt.substring(0, 10);
   const lines = receiptIds.map(function(receiptId, index) {
+    const amount = amounts[index];
     return {
+      transaction_date: transactionDate,
       description: groupName + ' (' + (index + 1) + '/' + receiptIds.length + ')',
+      amount: amount > 0 ? amount : 1,
       receipt_id: receiptId,
     };
   });
 
   const payload = {
     company_id: companyId,
-    title: groupName + ' (' + paymentMethodName + ') ' + capturedAt.substring(0, 10),
-    issue_date: capturedAt.substring(0, 10),
+    title: groupName + ' (' + paymentMethodName + ') ' + transactionDate,
+    issue_date: transactionDate,
     expense_application_lines: lines,
   };
 

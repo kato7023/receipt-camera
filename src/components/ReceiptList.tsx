@@ -151,6 +151,7 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
         paymentMethodId: r.paymentMethodId,
         paymentMethodName: r.paymentMethodName,
         groupName: r.groupName,
+        amount: r.amount ?? 1,
         memo: r.memo,
         capturedAt: r.createdAt,
       }));
@@ -324,6 +325,7 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
               </div>
               <div className="receipt-card-info">
                 <span className="receipt-date">{formatDate(receipt.createdAt)}</span>
+                <span className="receipt-amount">¥{(receipt.amount ?? 1).toLocaleString()}</span>
                 <span className="receipt-payment">{receipt.paymentMethodName}</span>
                 {receipt.companyName && <span className="receipt-company">{receipt.companyName}</span>}
               </div>

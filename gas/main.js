@@ -116,6 +116,7 @@ function processSingleReceipt(index, item, companies) {
       company.freeeCompanyId,
       freeeReceiptId,
       item.paymentMethodName,
+      item.amount,
       item.memo,
       item.capturedAt
     );
@@ -192,9 +193,11 @@ function processGroupReceipts(indices, items, companies) {
     }
 
     // Step 3: グループ経費精算下書き作成（N明細を1経費精算に）
+    const amounts = items.map(function(item) { return item.amount; });
     const freeeExpenseId = createGroupExpenseDraft(
       company.freeeCompanyId,
       freeeReceiptIds,
+      amounts,
       firstItem.paymentMethodName,
       firstItem.groupName || 'グループ',
       firstItem.capturedAt
