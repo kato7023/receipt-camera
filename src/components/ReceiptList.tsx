@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, updateReceiptCompany, updateReceiptGroup, updateUploadStatus, deleteReceipts } from '../db';
+import { db, updateReceiptGroup, updateUploadStatus, deleteReceipts } from '../db';
 import type { Receipt, Company } from '../db';
 import { getCachedCompanies, uploadReceipts } from '../api';
 import CompanyAssigner from './CompanyAssigner';
@@ -98,20 +98,12 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
   // 会社割当（選択中のレシートに会社を設定）
   const handleCompanyAssign = useCallback(async (company: Company | null) => {
     try {
+      const ids = Array.from(selectedIds);
+      // 単一トランザクションで一括更新（iOS Safari のIndexedDBは並行トランザクションに弱いため）
       if (company) {
-        // 並列で会社を設定
-        await Promise.all(
-          Array.from(selectedIds).map((id) =>
-            updateReceiptCompany(id, company.id, company.name)
-          )
-        );
+        await db.receipts.where('id').anyOf(ids).modify({ companyId: company.id, companyName: company.name });
       } else {
-        // 並列で会社の設定を解除
-        await Promise.all(
-          Array.from(selectedIds).map((id) =>
-            db.receipts.update(id, { companyId: null, companyName: null })
-          )
-        );
+        await db.receipts.where('id').anyOf(ids).modify({ companyId: null, companyName: null });
       }
     } catch (err) {
       console.error('会社割り当てに失敗しました:', err);

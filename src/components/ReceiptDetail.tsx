@@ -38,6 +38,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   const [groupInput, setGroupInput] = useState('');
 
   const groupInputRef = useRef<HTMLInputElement>(null);
+  const imageUrlRef = useRef<string>('');
 
   // データの読み込み
   const loadReceiptData = useCallback(async () => {
@@ -47,12 +48,12 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
       setCurrentReceipt(data);
       setMemo(data.memo || '');
       setGroupInput(data.groupName || '');
-      
-      const url = URL.createObjectURL(data.image);
-      setImageUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return url;
-      });
+
+      const newUrl = URL.createObjectURL(data.image);
+      const oldUrl = imageUrlRef.current;
+      imageUrlRef.current = newUrl;
+      setImageUrl(newUrl);
+      if (oldUrl) URL.revokeObjectURL(oldUrl);
     }
   }, [receipt.id]);
 
@@ -60,14 +61,14 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
     loadReceiptData();
   }, [loadReceiptData]);
 
-  // クリーンアップ
+  // アンマウント時のみ解放（更新時の解放は loadReceiptData 内で一元管理）
   useEffect(() => {
     return () => {
-      if (imageUrl) {
-        URL.revokeObjectURL(imageUrl);
+      if (imageUrlRef.current) {
+        URL.revokeObjectURL(imageUrlRef.current);
       }
     };
-  }, [imageUrl]);
+  }, []);
 
   useEffect(() => {
     getCachedCompanies().then(setCompanies);
@@ -201,27 +202,6 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
               <span className="detail-meta-value">{currentReceipt.paymentMethodName}</span>
               <svg className="edit-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
             </div>
-
-            {/* 支払い方法クイックセレクター */}
-            {showPaymentSelector && (
-              <div className="payment-quick-selector" onClick={(e) => e.stopPropagation()}>
-                <div className="quick-selector-header">
-                  <span>支払い方法を変更</span>
-                  <button className="quick-selector-close" onClick={() => setShowPaymentSelector(false)}>×</button>
-                </div>
-                <div className="quick-selector-list">
-                  {paymentMethods.map(m => (
-                    <button
-                      key={m.id}
-                      className={`quick-selector-item ${currentReceipt.paymentMethodId === m.id ? 'active' : ''}`}
-                      onClick={() => handlePaymentSelect(m)}
-                    >
-                      {m.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* 会社 */}
@@ -337,6 +317,39 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
           onSelect={handleCompanySelect}
           onClose={() => setShowCompanySelector(false)}
         />
+      )}
+
+      {/* 支払い方法選択モーダル */}
+      {showPaymentSelector && (
+        <div className="modal-overlay" onClick={() => setShowPaymentSelector(false)}>
+          <div className="modal-sheet compact" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>支払い方法を選択</h3>
+              <button className="modal-close" onClick={() => setShowPaymentSelector(false)}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div className="company-list">
+              {paymentMethods.map((m) => (
+                <button
+                  key={m.id}
+                  className={`company-card ${currentReceipt.paymentMethodId === m.id ? 'active' : ''}`}
+                  onClick={() => handlePaymentSelect(m)}
+                >
+                  <span>{m.name}</span>
+                  {currentReceipt.paymentMethodId === m.id && (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="check-icon">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
