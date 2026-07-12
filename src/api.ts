@@ -72,6 +72,39 @@ function getBaseUrl(): string {
 }
 
 /**
+ * APIキー（合言葉）。GAS側のScript Properties「API_KEY」と一致する必要がある。
+ * GAS WebアプリのURLは公開リポジトリから知られうるため、URLの秘匿に頼らず
+ * 第三者からの不正アップロードを防ぐための簡易認証として全リクエストに添付する。
+ */
+const API_KEY_STORAGE = 'apiKey';
+
+function getStoredApiKey(): string {
+  return localStorage.getItem(API_KEY_STORAGE) || '';
+}
+
+/**
+ * 未設定なら合言葉の入力を求める（アプリ起動時に一度だけ呼ぶ）。
+ * キャンセルした場合は未設定のまま進む（GAS側でAPI_KEY未設定なら従来通り動く）。
+ */
+export function ensureApiKey(): void {
+  if (localStorage.getItem(API_KEY_STORAGE)) return;
+  const input = window.prompt('合言葉（APIキー）を入力してください');
+  if (input && input.trim()) {
+    localStorage.setItem(API_KEY_STORAGE, input.trim());
+  }
+}
+
+/**
+ * サーバーがAPIキー不一致を返した場合、保存済みのキーを破棄する
+ * （次回アプリを開いたときに再入力を求めるため）。
+ */
+function clearApiKeyIfInvalid(errorMessage: string | undefined): void {
+  if (errorMessage && errorMessage.includes('APIキーが一致しません')) {
+    localStorage.removeItem(API_KEY_STORAGE);
+  }
+}
+
+/**
  * 会社一覧を取得
  */
 export async function fetchCompanies(): Promise<Company[]> {
@@ -81,10 +114,11 @@ export async function fetchCompanies(): Promise<Company[]> {
     return [];
   }
 
-  const response = await fetch(`${baseUrl}?action=companies`);
+  const response = await fetch(`${baseUrl}?action=companies&apiKey=${encodeURIComponent(getStoredApiKey())}`);
   const json: ApiResponse<Company[]> = await response.json();
 
   if (!json.success || !json.data) {
+    clearApiKeyIfInvalid(json.error);
     throw new Error(json.error || '会社一覧の取得に失敗しました');
   }
 
@@ -101,10 +135,11 @@ export async function fetchPaymentMethods(): Promise<PaymentMethod[]> {
     return getDefaultPaymentMethods();
   }
 
-  const response = await fetch(`${baseUrl}?action=paymentMethods`);
+  const response = await fetch(`${baseUrl}?action=paymentMethods&apiKey=${encodeURIComponent(getStoredApiKey())}`);
   const json: ApiResponse<PaymentMethod[]> = await response.json();
 
   if (!json.success || !json.data) {
+    clearApiKeyIfInvalid(json.error);
     throw new Error(json.error || '支払い方法一覧の取得に失敗しました');
   }
 
@@ -151,10 +186,11 @@ function sleep(ms: number): Promise<void> {
  */
 async function fetchUploadStatus(baseUrl: string, requestId: string, expectedCount: number): Promise<UploadStatusResult> {
   const response = await fetch(
-    `${baseUrl}?action=uploadStatus&requestId=${encodeURIComponent(requestId)}&expectedCount=${expectedCount}`
+    `${baseUrl}?action=uploadStatus&requestId=${encodeURIComponent(requestId)}&expectedCount=${expectedCount}&apiKey=${encodeURIComponent(getStoredApiKey())}`
   );
   const json: ApiResponse<UploadStatusResult> = await response.json();
   if (!json.success || !json.data) {
+    clearApiKeyIfInvalid(json.error);
     throw new Error(json.error || 'アップロード状況の確認に失敗しました');
   }
   return json.data;
@@ -272,7 +308,7 @@ export async function uploadReceipts(
     response = await fetch(baseUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'upload', requestId, receipts }),
+      body: JSON.stringify({ action: 'upload', apiKey: getStoredApiKey(), requestId, receipts }),
     });
   } catch (err) {
     return resolveAmbiguousUpload(baseUrl, requestId, items.length, (err as Error).message);
@@ -286,6 +322,7 @@ export async function uploadReceipts(
   }
 
   if (!json.success || !json.data) {
+    clearApiKeyIfInvalid(json.error);
     throw new Error(json.error || 'アップロードに失敗しました');
   }
 
@@ -390,6 +427,7 @@ export async function backupReceiptInBackground(receiptId: number): Promise<void
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'backupReceipt',
+        apiKey: getStoredApiKey(),
         imageBase64,
         mimeType: receipt.image.type || 'image/jpeg',
         companyId: receipt.companyId,

@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import CameraView from './components/CameraView';
 import ReceiptList from './components/ReceiptList';
 import ReceiptDetail from './components/ReceiptDetail';
-import { reconcilePendingUploads, backupPendingReceipts } from './api';
+import { reconcilePendingUploads, backupPendingReceipts, ensureApiKey } from './api';
 import type { Receipt } from './db';
 
 type TabType = 'camera' | 'list';
@@ -26,6 +26,12 @@ export default function App() {
 
   const handleUpdate = useCallback(() => {
     setRefreshKey((prev) => prev + 1);
+  }, []);
+
+  // 起動時にAPIキー（合言葉）が未設定なら入力を求める
+  // （GAS側のScript Properties「API_KEY」と一致しないと全APIが拒否される）
+  useEffect(() => {
+    ensureApiKey();
   }, []);
 
   // 起動時に「'uploading'のまま止まっているレシート」をGASへ問い合わせて解消する

@@ -9,6 +9,11 @@
  */
 function doGet(e) {
   try {
+    const authError = checkApiKey(e.parameter.apiKey);
+    if (authError) {
+      return jsonResponse({ success: false, error: authError });
+    }
+
     const action = e.parameter.action;
 
     let data;
@@ -41,6 +46,11 @@ function doGet(e) {
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
+
+    const authError = checkApiKey(body.apiKey);
+    if (authError) {
+      return jsonResponse({ success: false, error: authError });
+    }
 
     if (body.action === 'backupReceipt') {
       const result = backupReceipt(body);
@@ -375,6 +385,20 @@ function processGroupReceipts(indices, items, companies, requestId) {
       error: message,
     }));
   }
+}
+
+/**
+ * APIキー（合言葉）チェック。
+ * Script Properties に API_KEY が設定されている場合のみ有効になる
+ * （未設定の間は従来通り全リクエストを許可するため、設定前にアプリが壊れることはない）。
+ * GAS WebアプリのURLは公開リポジトリから知られうるため、URLの秘匿に頼らない防御として導入。
+ * @returns {string|null} エラーメッセージ（認証OKなら null）
+ */
+function checkApiKey(provided) {
+  const expected = PropertiesService.getScriptProperties().getProperty('API_KEY');
+  if (!expected) return null;
+  if (provided === expected) return null;
+  return 'APIキーが一致しません。アプリを開き直して正しい合言葉を入力してください。';
 }
 
 /**
