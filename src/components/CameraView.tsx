@@ -25,9 +25,10 @@ export default function CameraView({ onCapture }: CameraViewProps) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
 
-  // グループ選択（任意）
+  // グループ選択・作成（任意）
   const [existingGroups, setExistingGroups] = useState<string[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [newGroupInput, setNewGroupInput] = useState('');
 
   // 金額（任意。未入力の場合は1円で登録 — freeeの経費申請作成に金額が必須のため）
   const [amountInput, setAmountInput] = useState('');
@@ -85,6 +86,15 @@ export default function CameraView({ onCapture }: CameraViewProps) {
   const handleGroupSelect = useCallback((groupName: string | null) => {
     setSelectedGroup(prev => prev === groupName ? null : groupName);
   }, []);
+
+  // 新しいグループタグを作成して選択状態にする
+  const handleCreateGroup = useCallback(() => {
+    const trimmed = newGroupInput.trim();
+    if (!trimmed) return;
+    setExistingGroups((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed].sort()));
+    setSelectedGroup(trimmed);
+    setNewGroupInput('');
+  }, [newGroupInput]);
 
   const handleCapture = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -174,6 +184,43 @@ export default function CameraView({ onCapture }: CameraViewProps) {
           />
         </div>
 
+        <div className="picker-divider" />
+
+        {/* グループ選択・作成（任意） */}
+        <div className="picker-section">
+          <span className="picker-section-title">グループ選択・作成</span>
+          {existingGroups.length > 0 && (
+            <div className="group-buttons">
+              {existingGroups.map((name) => (
+                <button
+                  key={name}
+                  className={`group-button ${selectedGroup === name ? 'active' : ''}`}
+                  onClick={() => handleGroupSelect(name)}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="group-create-row">
+            <input
+              type="text"
+              className="group-create-input"
+              value={newGroupInput}
+              onChange={(e) => setNewGroupInput(e.target.value)}
+              placeholder="新しいグループ名を入力..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreateGroup();
+              }}
+            />
+            <button className="group-create-button" onClick={handleCreateGroup} disabled={!newGroupInput.trim()}>
+              追加
+            </button>
+          </div>
+        </div>
+
+        <div className="picker-divider" />
+
         {/* 金額入力（任意・未入力なら1円で登録） */}
         <div className="amount-section">
           <span className="picker-section-title">金額</span>
@@ -186,29 +233,6 @@ export default function CameraView({ onCapture }: CameraViewProps) {
             placeholder="未入力の場合は1円で登録"
           />
         </div>
-
-        {/* グループ選択（既存グループがある場合のみ表示） */}
-        {existingGroups.length > 0 && (
-          <div className="group-picker">
-            <div className="group-picker-label">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-              </svg>
-              <span>グループ</span>
-            </div>
-            <div className="group-buttons">
-              {existingGroups.map((name) => (
-                <button
-                  key={name}
-                  className={`group-button ${selectedGroup === name ? 'active' : ''}`}
-                  onClick={() => handleGroupSelect(name)}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* ステータス表示 */}
         {captureCount > 0 && (

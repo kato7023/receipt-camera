@@ -2,6 +2,7 @@
  * GAS Web App API クライアント
  */
 
+
 import type { Company, PaymentMethod } from './db';
 
 // GAS Web App のデプロイ URL（セットアップ時に設定）
