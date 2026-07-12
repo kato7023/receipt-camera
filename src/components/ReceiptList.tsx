@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { db, updateReceiptGroup, updateReceiptsCompany, updateUploadStatus, deleteReceipts } from '../db';
 import type { Receipt, Company } from '../db';
-import { getCachedCompanies, uploadReceipts } from '../api';
+import { getCachedCompanies, uploadReceipts, generateUploadRequestId } from '../api';
 import CompanyAssigner from './CompanyAssigner';
 import GroupManager from './GroupManager';
 
@@ -138,10 +138,12 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
     if (targetReceipts.length === 0) return;
 
     setIsUploading(true);
+    const requestId = generateUploadRequestId();
     try {
-      // ステータスをuploadingに更新
-      for (const r of targetReceipts) {
-        await updateUploadStatus(r.id!, 'uploading');
+      // ステータスをuploadingに更新（requestId・順番も保存し、通信断で
+      // 応答が届かなかった場合に後からGASへ結果を問い合わせられるようにする）
+      for (let i = 0; i < targetReceipts.length; i++) {
+        await updateUploadStatus(targetReceipts[i].id!, 'uploading', null, requestId, i);
       }
       loadReceipts();
 
@@ -156,7 +158,7 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
         capturedAt: r.createdAt,
       }));
 
-      const results = await uploadReceipts(items);
+      const results = await uploadReceipts(items, requestId);
 
       // 結果を反映
       for (const result of results) {

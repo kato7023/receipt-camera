@@ -1,7 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import CameraView from './components/CameraView';
 import ReceiptList from './components/ReceiptList';
 import ReceiptDetail from './components/ReceiptDetail';
+import { reconcilePendingUploads } from './api';
 import type { Receipt } from './db';
 
 type TabType = 'camera' | 'list';
@@ -25,6 +26,14 @@ export default function App() {
 
   const handleUpdate = useCallback(() => {
     setRefreshKey((prev) => prev + 1);
+  }, []);
+
+  // 起動時に「'uploading'のまま止まっているレシート」をGASへ問い合わせて解消する
+  // （通信断発生直後にアプリを閉じてしまった場合の救済）
+  useEffect(() => {
+    reconcilePendingUploads().then(() => {
+      setRefreshKey((prev) => prev + 1);
+    });
   }, []);
 
   return (

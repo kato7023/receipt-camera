@@ -158,6 +158,10 @@ function refreshMasterCache() {
 
 /**
  * ログをスプレッドシートに記録
+ *
+ * requestId・receiptIndexは、通信断でクライアントがレスポンスを受け取れなかった際に
+ * doGet(action=uploadStatus)からこのシートを検索して結果を復元するためのキーとして使う
+ * （CacheServiceは短命な「受信済みマーカー」にのみ使い、結果の真実は常にこのシートに残す）。
  */
 function writeLog(entry) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -168,8 +172,11 @@ function writeLog(entry) {
     sheet.appendRow([
       'タイムスタンプ', 'アクション', '会社名', '支払い方法',
       'グループ名', 'Drive File ID', 'Freee Receipt ID',
-      'Freee Expense ID', 'ステータス', 'エラー'
+      'Freee Expense ID', 'ステータス', 'エラー', 'Request ID', 'Receipt Index'
     ]);
+  } else if (sheet.getLastColumn() < 12) {
+    // 既存シートに新しい列を追加（自己修復。何度呼ばれても安全）
+    sheet.getRange(1, 11, 1, 2).setValues([['Request ID', 'Receipt Index']]);
   }
 
   sheet.appendRow([
@@ -183,5 +190,40 @@ function writeLog(entry) {
     entry.freeeExpenseId,
     entry.status,
     entry.error,
+    entry.requestId || '',
+    entry.receiptIndex !== undefined && entry.receiptIndex !== null ? entry.receiptIndex : '',
   ]);
+}
+
+/**
+ * requestIdをキーに「アップロードログ」シートを検索し、UploadResult[]相当の形に復元する。
+ * doGet(action=uploadStatus)から使用する（結果の真実は常にこのシート）。
+ * @returns {Array<{receiptIndex:number, driveFileId:string, freeeReceiptId:string, freeeExpenseId:string, status:string, error:string}>}
+ */
+function findLoggedResultsByRequestId(requestId) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName('アップロードログ');
+  if (!sheet) return [];
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  const data = sheet.getRange(2, 1, lastRow - 1, 12).getValues();
+  const results = [];
+
+  for (const row of data) {
+    const rowRequestId = row[10];
+    if (String(rowRequestId) !== String(requestId)) continue;
+
+    results.push({
+      receiptIndex: Number(row[11]),
+      driveFileId: String(row[5] || ''),
+      freeeReceiptId: String(row[6] || ''),
+      freeeExpenseId: String(row[7] || ''),
+      status: String(row[8] || 'error'),
+      error: String(row[9] || ''),
+    });
+  }
+
+  return results;
 }

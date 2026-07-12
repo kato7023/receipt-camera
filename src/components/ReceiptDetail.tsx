@@ -12,7 +12,7 @@ import {
   updateReceiptPaymentMethod,
   updateReceiptAmount
 } from '../db';
-import { getCachedCompanies, getCachedPaymentMethods, uploadReceipts } from '../api';
+import { getCachedCompanies, getCachedPaymentMethods, uploadReceipts, generateUploadRequestId } from '../api';
 import CompanyAssigner from './CompanyAssigner';
 
 interface ReceiptDetailProps {
@@ -150,8 +150,9 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   const handleRetry = useCallback(async () => {
     if (!receipt.id || !currentReceipt) return;
     setIsRetrying(true);
+    const requestId = generateUploadRequestId();
     try {
-      await updateUploadStatus(receipt.id, 'uploading');
+      await updateUploadStatus(receipt.id, 'uploading', null, requestId, 0);
       await loadReceiptData();
 
       const results = await uploadReceipts([{
@@ -163,7 +164,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
         amount: currentReceipt.amount ?? 1,
         memo: currentReceipt.memo,
         capturedAt: currentReceipt.createdAt,
-      }]);
+      }], requestId);
 
       const result = results[0];
       if (result?.status === 'completed') {

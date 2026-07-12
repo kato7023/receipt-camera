@@ -20,6 +20,9 @@ function doGet(e) {
       case 'paymentMethods':
         data = getPaymentMethods();
         break;
+      case 'uploadStatus':
+        data = getUploadStatus(e.parameter.requestId, Number(e.parameter.expectedCount) || 0);
+        break;
       default:
         return jsonResponse({ success: false, error: `不明なアクション: ${action}` });
     }
@@ -38,12 +41,20 @@ function doGet(e) {
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
+    const requestId = body.requestId || null;
 
     if (body.action !== 'upload') {
       return jsonResponse({ success: false, error: `不明なアクション: ${body.action}` });
     }
 
-    const results = processUpload(body.receipts);
+    // 通信断でレスポンスが届かなかった場合に doGet(action=uploadStatus) が
+    // 「GASが受信したかどうか」を判定できるよう、処理開始前に短命な目印を残す
+    // （結果そのものはアップロードログに記録するので、ここはあくまで受信マーカー）
+    if (requestId) {
+      CacheService.getScriptCache().put('UPLOAD_STARTED_' + requestId, String(Date.now()), 1200);
+    }
+
+    const results = processUpload(body.receipts, requestId);
     return jsonResponse({ success: true, data: results });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -55,7 +66,7 @@ function doPost(e) {
 /**
  * アップロード処理のメインロジック
  */
-function processUpload(receipts) {
+function processUpload(receipts, requestId) {
   const companies = getCompanies();
   const results = [];
 
@@ -79,13 +90,13 @@ function processUpload(receipts) {
 
   // 個別レシートを処理
   for (const { index, item } of individuals) {
-    const result = processSingleReceipt(index, item, companies);
+    const result = processSingleReceipt(index, item, companies, requestId);
     results.push(result);
   }
 
   // グループレシートを処理
   for (const [, group] of grouped) {
-    const groupResults = processGroupReceipts(group.indices, group.items, companies);
+    const groupResults = processGroupReceipts(group.indices, group.items, companies, requestId);
     results.push(...groupResults);
   }
 
@@ -93,9 +104,77 @@ function processUpload(receipts) {
 }
 
 /**
+ * requestId宛のアップロード結果を問い合わせる（doGet action=uploadStatus）。
+ * 結果はアップロードログシートが常に真実。CacheServiceの受信マーカーは
+ * 「そもそも届いたかどうか」の短時間の判定にのみ使う。
+ * @returns {{requestId:string, state:'unknown'|'processing'|'done', results:Array|null}}
+ */
+function getUploadStatus(requestId, expectedCount) {
+  if (!requestId) {
+    return { requestId: requestId || '', state: 'unknown', results: null };
+  }
+
+  const foundResults = findLoggedResultsByRequestId(requestId);
+  // クライアントがexpectedCountを渡し忘れた/おかしな値を送ってきた場合の保険として、
+  // 見つかった件数を下限に使う（結果を誤って切り捨てないため）
+  const effectiveExpectedCount = Math.max(expectedCount || 0, foundResults.length);
+
+  if (effectiveExpectedCount > 0 && foundResults.length >= effectiveExpectedCount) {
+    return { requestId, state: 'done', results: foundResults };
+  }
+
+  const startedAtRaw = CacheService.getScriptCache().get('UPLOAD_STARTED_' + requestId);
+
+  if (!startedAtRaw) {
+    if (foundResults.length > 0) {
+      // マーカーは消えたが記録は一部見つかった → GAS側で処理が途中終了したとみなし、
+      // 未完了分はエラー扱いで補完して返す（もう待っても続きは来ない）
+      return { requestId, state: 'done', results: fillMissingResultsAsError(foundResults, effectiveExpectedCount) };
+    }
+    return { requestId, state: 'unknown', results: null };
+  }
+
+  const elapsedMs = Date.now() - Number(startedAtRaw);
+  const GAS_EXECUTION_CEILING_MS = 7 * 60 * 1000; // GASの実行上限(6分)に余裕を持たせた閾値
+
+  if (elapsedMs < GAS_EXECUTION_CEILING_MS) {
+    return { requestId, state: 'processing', results: null };
+  }
+
+  // マーカーはあるが実行上限を明確に超えている → 異常終了とみなす
+  return { requestId, state: 'done', results: fillMissingResultsAsError(foundResults, effectiveExpectedCount) };
+}
+
+/**
+ * 見つかった結果に対し、expectedCount分に満たない receiptIndex を
+ * 「サーバー側処理が完了しなかった」エラー結果で補完する。
+ */
+function fillMissingResultsAsError(foundResults, expectedCount) {
+  const byIndex = {};
+  foundResults.forEach(function(r) { byIndex[r.receiptIndex] = r; });
+
+  const filled = [];
+  for (let i = 0; i < expectedCount; i++) {
+    if (byIndex[i]) {
+      filled.push(byIndex[i]);
+    } else {
+      filled.push({
+        receiptIndex: i,
+        driveFileId: '',
+        freeeReceiptId: '',
+        freeeExpenseId: '',
+        status: 'error',
+        error: 'サーバー側の処理が完了しませんでした（タイムアウトの可能性があります）',
+      });
+    }
+  }
+  return filled;
+}
+
+/**
  * 個別レシートの処理
  */
-function processSingleReceipt(index, item, companies) {
+function processSingleReceipt(index, item, companies, requestId) {
   const company = companies.find(c => c.id === item.companyId);
   if (!company) {
     return { receiptIndex: index, driveFileId: '', status: 'error', error: `会社ID ${item.companyId} が見つかりません` };
@@ -133,6 +212,8 @@ function processSingleReceipt(index, item, companies) {
       freeeExpenseId: String(freeeExpenseId),
       status: 'completed',
       error: '',
+      requestId: requestId,
+      receiptIndex: index,
     });
 
     return { receiptIndex: index, driveFileId, freeeReceiptId, freeeExpenseId, status: 'completed' };
@@ -150,6 +231,8 @@ function processSingleReceipt(index, item, companies) {
       freeeExpenseId: '',
       status: 'error',
       error: message,
+      requestId: requestId,
+      receiptIndex: index,
     });
 
     return {
@@ -164,7 +247,7 @@ function processSingleReceipt(index, item, companies) {
 /**
  * グループレシートの処理
  */
-function processGroupReceipts(indices, items, companies) {
+function processGroupReceipts(indices, items, companies, requestId) {
   const firstItem = items[0];
   const company = companies.find(c => c.id === firstItem.companyId);
   if (!company) {
@@ -186,11 +269,9 @@ function processGroupReceipts(indices, items, companies) {
       driveFileIds.push(fileId);
     }
 
-    // Step 2: 全画像を Freee に証憑アップロード
-    for (const fileId of driveFileIds) {
-      const receiptId = uploadReceiptToFreee(fileId, company.freeeCompanyId);
-      freeeReceiptIds.push(receiptId);
-    }
+    // Step 2: 全画像を Freee に証憑アップロード（並列実行で高速化）
+    const uploadedReceiptIds = uploadReceiptsToFreeeBatch(driveFileIds, company.freeeCompanyId);
+    freeeReceiptIds.push.apply(freeeReceiptIds, uploadedReceiptIds);
 
     // Step 3: グループ経費精算下書き作成（N明細を1経費精算に）
     const amounts = items.map(function(item) { return item.amount; });
@@ -217,6 +298,8 @@ function processGroupReceipts(indices, items, companies) {
         freeeExpenseId: String(freeeExpenseId),
         status: 'completed',
         error: '',
+        requestId: requestId,
+        receiptIndex: indices[i],
       });
     });
 
@@ -244,6 +327,8 @@ function processGroupReceipts(indices, items, companies) {
         freeeExpenseId: '',
         status: 'error',
         error: message,
+        requestId: requestId,
+        receiptIndex: indices[i],
       });
     });
 
@@ -336,9 +421,9 @@ function setupMasterSheets() {
     logSheet.appendRow([
       'タイムスタンプ', 'アクション', '会社名', '支払い方法',
       'グループ名', 'Drive File ID', 'Freee Receipt ID',
-      'Freee Expense ID', 'ステータス', 'エラー'
+      'Freee Expense ID', 'ステータス', 'エラー', 'Request ID', 'Receipt Index'
     ]);
-    logSheet.getRange(1, 1, 1, 10).setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
+    logSheet.getRange(1, 1, 1, 12).setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
     Logger.log('✅ アップロードログシートを作成しました');
   } else {
     Logger.log('ℹ️ アップロードログシートは既に存在します');

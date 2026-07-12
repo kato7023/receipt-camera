@@ -28,6 +28,13 @@ export interface Receipt {
   uploadError: string | null;
   uploadedAt: Date | null;
 
+  // 直近のアップロード試行のリクエストID（'uploading'中のみ設定。
+  // 通信断でレスポンスが届かなかった場合に、後からGASへ結果を問い合わせるためのキー）
+  uploadRequestId: string | null;
+  // そのリクエスト内でこのレシートが何番目だったか（0始まり）。
+  // 後から結果を問い合わせた際、GASが返すreceiptIndexとこのレシートを正しく対応付けるために使う
+  uploadRequestIndex: number | null;
+
   memo: string;
 }
 
@@ -130,6 +137,8 @@ export async function saveReceipt(
     uploadStatus: 'pending',
     uploadError: null,
     uploadedAt: null,
+    uploadRequestId: null,
+    uploadRequestIndex: null,
     memo: '',
   });
   return id as number;
@@ -209,17 +218,25 @@ export async function updateReceiptGroup(
 }
 
 /**
- * 領収書のアップロードステータスを更新する
+ * 領収書のアップロードステータスを更新する。
+ * status を 'uploading' にする際は requestId・requestIndex（そのアップロード
+ * リクエスト内での0始まりの順番）を渡して保存しておくことで、通信断でアプリを
+ * 閉じてしまった場合にも次回起動時にGASへ結果を問い合わせられる。
+ * 'completed'/'error' になったら requestId・requestIndex はクリアする。
  */
 export async function updateUploadStatus(
   id: number,
   status: Receipt['uploadStatus'],
-  error: string | null = null
+  error: string | null = null,
+  requestId: string | null = null,
+  requestIndex: number | null = null
 ): Promise<void> {
   await updateReceiptFields([id], {
     uploadStatus: status,
     uploadError: error,
     uploadedAt: status === 'completed' ? new Date() : null,
+    uploadRequestId: status === 'uploading' ? requestId : null,
+    uploadRequestIndex: status === 'uploading' ? requestIndex : null,
   });
 }
 

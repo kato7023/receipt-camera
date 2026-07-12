@@ -114,6 +114,56 @@ function uploadReceiptToFreee(driveFileId, companyId) {
 }
 
 /**
+ * 複数の証憑（領収書画像）を Freee に並列アップロードする（グループアップロード高速化用）。
+ * UrlFetchApp.fetchAll() で全件を同時送信することで、1枚ずつ順番に送る場合に比べて
+ * 処理時間を大幅に短縮する（グループアップロードが数十秒かかり、その間の通信断で
+ * クライアント側がエラー表示になりやすい問題への対策）。
+ * @param {string[]} driveFileIds Google Drive のファイル ID の配列
+ * @param {number} companyId Freee の事業所 ID
+ * @returns {number[]} Freee の証憑 ID (receipt_id) の配列（driveFileIdsと同じ順序）
+ */
+function uploadReceiptsToFreeeBatch(driveFileIds, companyId) {
+  validateFreeeRequest('POST', 'receipts');
+
+  const req = new FreeeAPI.Request('receipts');
+  const url = req.url;
+  const token = req.token;
+
+  const requests = driveFileIds.map(function(driveFileId) {
+    const file = DriveApp.getFileById(driveFileId);
+    const blob = file.getBlob();
+    return {
+      url: url,
+      method: 'post',
+      headers: { 'Authorization': 'Bearer ' + token },
+      payload: {
+        'company_id': String(companyId),
+        'receipt': blob,
+      },
+      muteHttpExceptions: true,
+    };
+  });
+
+  const responses = UrlFetchApp.fetchAll(requests);
+
+  return responses.map(function(response, i) {
+    const status = response.getResponseCode();
+    const text = response.getContentText();
+
+    if (String(status).match(/2\d\d/) === null) {
+      throw new Error('Freee APIエラー (HTTP ' + status + ', receipts, ' + (i + 1) + '件目): ' + text);
+    }
+
+    const result = text ? JSON.parse(text) : null;
+    if (!result || !result.receipt) {
+      throw new Error('Freee 証憑アップロードに失敗しました(' + (i + 1) + '件目): ' + JSON.stringify(result));
+    }
+
+    return result.receipt.id;
+  });
+}
+
+/**
  * 経費精算の下書きを作成（個別 = 1レシート → 1明細）
  * @param {number} companyId Freee の事業所 ID
  * @param {number} receiptId Freee の証憑 ID
