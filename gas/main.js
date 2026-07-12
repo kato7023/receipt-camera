@@ -203,18 +203,21 @@ function processGroupReceipts(indices, items, companies) {
       firstItem.capturedAt
     );
 
-    // ログ記録
-    writeLog({
-      timestamp: new Date().toISOString(),
-      action: 'upload_group',
-      companyName: company.name,
-      paymentMethod: firstItem.paymentMethodName,
-      groupName: firstItem.groupName || '',
-      driveFileId: driveFileIds.join(','),
-      freeeReceiptId: freeeReceiptIds.join(','),
-      freeeExpenseId: String(freeeExpenseId),
-      status: 'completed',
-      error: '',
+    // ログ記録（グループ内のレシートごとに1行。freeeExpenseIdは全行共通のため
+    // 同じ経費申請にまとまった複数レシートであることが後から分かる）
+    items.forEach(function(item, i) {
+      writeLog({
+        timestamp: new Date().toISOString(),
+        action: 'upload_group',
+        companyName: company.name,
+        paymentMethod: item.paymentMethodName,
+        groupName: firstItem.groupName || '',
+        driveFileId: driveFileIds[i],
+        freeeReceiptId: String(freeeReceiptIds[i]),
+        freeeExpenseId: String(freeeExpenseId),
+        status: 'completed',
+        error: '',
+      });
     });
 
     return indices.map((index, i) => ({
@@ -227,17 +230,21 @@ function processGroupReceipts(indices, items, companies) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
-    writeLog({
-      timestamp: new Date().toISOString(),
-      action: 'upload_group',
-      companyName: company.name,
-      paymentMethod: firstItem.paymentMethodName,
-      groupName: firstItem.groupName || '',
-      driveFileId: driveFileIds.join(','),
-      freeeReceiptId: freeeReceiptIds.join(','),
-      freeeExpenseId: '',
-      status: 'error',
-      error: message,
+    // ログ記録（グループ内のレシートごとに1行。Drive保存・証憑アップロードが
+    // 完了していた分は各行にIDが残るので、どこまで進んでいたか後から分かる）
+    items.forEach(function(item, i) {
+      writeLog({
+        timestamp: new Date().toISOString(),
+        action: 'upload_group',
+        companyName: company.name,
+        paymentMethod: item.paymentMethodName,
+        groupName: firstItem.groupName || '',
+        driveFileId: driveFileIds[i] || '',
+        freeeReceiptId: freeeReceiptIds[i] ? String(freeeReceiptIds[i]) : '',
+        freeeExpenseId: '',
+        status: 'error',
+        error: message,
+      });
     });
 
     return indices.map((index, i) => ({
