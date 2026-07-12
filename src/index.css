@@ -699,6 +699,22 @@ body {
   margin-bottom: var(--space-sm);
 }
 
+/* Uploading Banner */
+.uploading-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-sm);
+  background: var(--accent-amber-subtle);
+  color: var(--accent-amber);
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  animation: slideDown 0.3s ease-out;
+}
+
 .select-mode-button {
   padding: var(--space-xs) var(--space-md);
   background: var(--bg-surface);

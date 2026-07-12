@@ -263,6 +263,14 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
         )}
       </div>
 
+      {/* アップロード中表示（通信断でポーリング中の場合も含め、処理が確定するまで表示） */}
+      {isUploading && (
+        <div className="uploading-banner">
+          <div className="shutter-spinner small" />
+          <span>アップロード中...</span>
+        </div>
+      )}
+
       {/* フィルター */}
       <div className="filter-tabs">
         <button className={`filter-tab ${filter === 'pending' ? 'active' : ''}`} onClick={() => setFilter('pending')}>
