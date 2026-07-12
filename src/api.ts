@@ -148,13 +148,35 @@ export async function uploadReceipts(
     }))
   );
 
-  const response = await fetch(baseUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'upload', receipts }),
-  });
+  // fetch自体やレスポンス読み取りの失敗は「サーバーの応答を確認できなかった」だけで、
+  // GAS側の処理（freeeへのアップロード含む）は継続・完了している可能性がある
+  // （グループアップロードは数十秒かかることがあり、その間の通信断で起きやすい）。
+  // 安易にリトライするとfreee側に重複登録される恐れがあるため、明確に区別したメッセージにする。
+  let response: Response;
+  try {
+    response = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upload', receipts }),
+    });
+  } catch (err) {
+    throw new Error(
+      '通信エラーのためサーバーからの応答を確認できませんでした。処理自体はサーバー側で完了している可能性があります。' +
+      'リトライする前に、freeeやスプレッドシートの「アップロードログ」で実際にアップロード・登録済みでないか確認してください。' +
+      '（詳細: ' + (err as Error).message + '）'
+    );
+  }
 
-  const json: ApiResponse<UploadResult[]> = await response.json();
+  let json: ApiResponse<UploadResult[]>;
+  try {
+    json = await response.json();
+  } catch (err) {
+    throw new Error(
+      '通信エラーのためサーバーからの応答を読み取れませんでした。処理自体はサーバー側で完了している可能性があります。' +
+      'リトライする前に、freeeやスプレッドシートの「アップロードログ」で実際にアップロード・登録済みでないか確認してください。' +
+      '（詳細: ' + (err as Error).message + '）'
+    );
+  }
 
   if (!json.success || !json.data) {
     throw new Error(json.error || 'アップロードに失敗しました');
