@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import CameraView from './components/CameraView';
 import ReceiptList from './components/ReceiptList';
 import ReceiptDetail from './components/ReceiptDetail';
-import { reconcilePendingUploads } from './api';
+import { reconcilePendingUploads, backupPendingReceipts } from './api';
 import type { Receipt } from './db';
 
 type TabType = 'camera' | 'list';
@@ -34,6 +34,11 @@ export default function App() {
     reconcilePendingUploads().then(() => {
       setRefreshKey((prev) => prev + 1);
     });
+  }, []);
+
+  // 起動時に、撮影直後のバックグラウンドバックアップに失敗したままのレシートを再試行する
+  useEffect(() => {
+    backupPendingReceipts();
   }, []);
 
   return (

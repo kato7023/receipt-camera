@@ -196,6 +196,35 @@ function writeLog(entry) {
 }
 
 /**
+ * 撮影直後のバックグラウンドバックアップを「撮影記録」シートに記録する。
+ * PWA側のローカルデータ（IndexedDB）が失われても、Drive上の画像とこのシートの記録から
+ * 内容を追跡・復旧できるようにするための、アップロード操作とは独立した保全用の記録。
+ */
+function appendCaptureRecord(entry) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sheet = ss.getSheetByName('撮影記録');
+
+  if (!sheet) {
+    sheet = ss.insertSheet('撮影記録');
+    sheet.appendRow([
+      'タイムスタンプ', '会社名', '支払い方法', 'グループ名', '金額', 'メモ', '撮影日時', 'Drive File ID'
+    ]);
+    sheet.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
+  }
+
+  sheet.appendRow([
+    entry.timestamp,
+    entry.companyName,
+    entry.paymentMethod,
+    entry.groupName,
+    entry.amount,
+    entry.memo,
+    entry.capturedAt,
+    entry.driveFileId,
+  ]);
+}
+
+/**
  * requestIdをキーに「アップロードログ」シートを検索し、UploadResult[]相当の形に復元する。
  * doGet(action=uploadStatus)から使用する（結果の真実は常にこのシート）。
  * @returns {Array<{receiptIndex:number, driveFileId:string, freeeReceiptId:string, freeeExpenseId:string, status:string, error:string}>}

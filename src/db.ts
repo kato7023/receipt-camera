@@ -35,6 +35,12 @@ export interface Receipt {
   // 後から結果を問い合わせた際、GASが返すreceiptIndexとこのレシートを正しく対応付けるために使う
   uploadRequestIndex: number | null;
 
+  // 撮影直後にバックグラウンドでバックアップ済みのDriveファイルID。
+  // ローカルDBが失われても、Drive+スプレッドシート「撮影記録」から復旧できるようにするため、
+  // アップロードボタンを押す前の時点で撮影直後に非同期でバックアップを試みる。
+  // アップロード時、これが設定済みならGAS側でDriveへの再アップロードをスキップして再利用する。
+  driveFileId: string | null;
+
   memo: string;
 }
 
@@ -139,6 +145,7 @@ export async function saveReceipt(
     uploadedAt: null,
     uploadRequestId: null,
     uploadRequestIndex: null,
+    driveFileId: null,
     memo: '',
   });
   return id as number;
@@ -238,6 +245,16 @@ export async function updateUploadStatus(
     uploadRequestId: status === 'uploading' ? requestId : null,
     uploadRequestIndex: status === 'uploading' ? requestIndex : null,
   });
+}
+
+/**
+ * 撮影直後のバックグラウンドバックアップが成功した際に、DriveファイルIDを記録する
+ */
+export async function updateReceiptDriveFileId(
+  id: number,
+  driveFileId: string
+): Promise<void> {
+  await updateReceiptFields([id], { driveFileId });
 }
 
 /**

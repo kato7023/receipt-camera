@@ -3,7 +3,7 @@
  */
 
 
-import { db, updateUploadStatus } from './db';
+import { db, updateUploadStatus, updateReceiptDriveFileId } from './db';
 import type { Company, PaymentMethod, Receipt } from './db';
 
 // GAS Web App のデプロイ URL（セットアップ時に設定）
@@ -40,6 +40,9 @@ interface UploadReceiptItem {
   amount: number;
   memo: string;
   capturedAt: string;
+  // 撮影直後のバックグラウンドバックアップで既にDriveへ保存済みならそのファイルID。
+  // GAS側はこれがあればDriveへの再保存をスキップして再利用する
+  driveFileId?: string | null;
 }
 
 /**
@@ -235,6 +238,7 @@ export async function uploadReceipts(
     amount: number;
     memo: string;
     capturedAt: Date;
+    driveFileId?: string | null;
   }[],
   requestId: string
 ): Promise<UploadResult[]> {
@@ -255,6 +259,7 @@ export async function uploadReceipts(
       amount: item.amount > 0 ? item.amount : 1,
       memo: item.memo,
       capturedAt: item.capturedAt.toISOString(),
+      driveFileId: item.driveFileId ?? null,
     }))
   );
 
@@ -363,6 +368,61 @@ export async function reconcilePendingUploads(): Promise<void> {
       console.error('reconcilePendingUploads: status check failed for', requestId, err);
     }
   }
+}
+
+/**
+ * 撮影直後、アップロードボタンを待たずにバックグラウンドでDriveへ画像をバックアップする。
+ * ベストエフォート（失敗しても撮影自体のUI・操作感には一切影響させない）。
+ * freeeへは一切アクセスせず、Drive保存と「撮影記録」シートへの記録のみ行う。
+ * 成功したらdriveFileIdをローカルに保存し、実際のアップロード時にDriveへの再保存を避ける。
+ */
+export async function backupReceiptInBackground(receiptId: number): Promise<void> {
+  try {
+    const receipt = await db.receipts.get(receiptId);
+    if (!receipt || receipt.driveFileId) return;
+
+    const baseUrl = getBaseUrl();
+    if (!baseUrl) return;
+
+    const imageBase64 = await blobToBase64(receipt.image);
+    const response = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'backupReceipt',
+        imageBase64,
+        mimeType: receipt.image.type || 'image/jpeg',
+        companyId: receipt.companyId,
+        companyName: receipt.companyName,
+        paymentMethodName: receipt.paymentMethodName,
+        groupName: receipt.groupName,
+        amount: receipt.amount,
+        memo: receipt.memo,
+        capturedAt: receipt.createdAt.toISOString(),
+      }),
+    });
+
+    const json: ApiResponse<{ driveFileId: string }> = await response.json();
+    if (json.success && json.data?.driveFileId) {
+      await updateReceiptDriveFileId(receiptId, json.data.driveFileId);
+    }
+  } catch (err) {
+    // オフライン等で失敗しても、次回起動時にbackupPendingReceiptsが再試行する
+    console.error('backupReceiptInBackground failed for', receiptId, err);
+  }
+}
+
+/**
+ * まだバックアップされていない（driveFileIdが未設定の）レシートを、
+ * アプリ起動時にまとめてベストエフォートで再試行する。
+ * アップロード済み（'completed'）のレシートはDrive保存が既に確定しているので対象外。
+ */
+export async function backupPendingReceipts(): Promise<void> {
+  const targets = await db.receipts
+    .filter((r) => !r.driveFileId && r.uploadStatus !== 'completed')
+    .toArray();
+
+  await Promise.all(targets.map((r) => backupReceiptInBackground(r.id!)));
 }
 
 /**

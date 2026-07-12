@@ -41,6 +41,12 @@ function doGet(e) {
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
+
+    if (body.action === 'backupReceipt') {
+      const result = backupReceipt(body);
+      return jsonResponse({ success: true, data: result });
+    }
+
     const requestId = body.requestId || null;
 
     if (body.action !== 'upload') {
@@ -61,6 +67,32 @@ function doPost(e) {
     console.error('doPost error:', message);
     return jsonResponse({ success: false, error: message });
   }
+}
+
+/**
+ * 撮影直後のバックグラウンドバックアップ処理。
+ * freeeへは一切アクセスせず、Driveへの画像保存と「撮影記録」シートへの記録のみ行う。
+ * PWA側のローカルデータが失われても、ここで残した記録から内容を追跡・復旧できるようにする。
+ */
+function backupReceipt(body) {
+  const companies = getCompanies();
+  const company = companies.find(c => c.id === body.companyId);
+  const companyName = company ? company.name : (body.companyName || '未分類');
+
+  const driveFileId = saveImageToDrive(body.imageBase64, body.mimeType, companyName, body.capturedAt);
+
+  appendCaptureRecord({
+    timestamp: new Date().toISOString(),
+    companyName: companyName,
+    paymentMethod: body.paymentMethodName || '',
+    groupName: body.groupName || '',
+    amount: body.amount || '',
+    memo: body.memo || '',
+    capturedAt: body.capturedAt || '',
+    driveFileId: driveFileId,
+  });
+
+  return { driveFileId };
 }
 
 /**
@@ -180,12 +212,15 @@ function processSingleReceipt(index, item, companies, requestId) {
     return { receiptIndex: index, driveFileId: '', status: 'error', error: `会社ID ${item.companyId} が見つかりません` };
   }
 
-  let driveFileId = '';
+  let driveFileId = item.driveFileId || '';
   let freeeReceiptId = '';
 
   try {
-    // Step 1: Drive に保存（最優先 — 画像保全）
-    driveFileId = saveImageToDrive(item.imageBase64, item.mimeType, company.name, item.capturedAt);
+    // Step 1: Drive に保存（撮影直後のバックグラウンドバックアップで既に保存済みならそれを再利用し、
+    // 同じ画像をDriveへ二重に保存しない。未保存（バックアップ失敗等）の場合はここで保存する）
+    if (!driveFileId) {
+      driveFileId = saveImageToDrive(item.imageBase64, item.mimeType, company.name, item.capturedAt);
+    }
 
     // Step 2: Freee に証憑アップロード
     freeeReceiptId = uploadReceiptToFreee(driveFileId, company.freeeCompanyId);
@@ -263,9 +298,10 @@ function processGroupReceipts(indices, items, companies, requestId) {
   const freeeReceiptIds = [];
 
   try {
-    // Step 1: 全画像を Drive に保存（画像保全優先）
+    // Step 1: 全画像を Drive に保存（撮影直後のバックグラウンドバックアップで
+    // 既に保存済みならそれを再利用し、同じ画像をDriveへ二重に保存しない）
     for (const item of items) {
-      const fileId = saveImageToDrive(item.imageBase64, item.mimeType, company.name, item.capturedAt);
+      const fileId = item.driveFileId || saveImageToDrive(item.imageBase64, item.mimeType, company.name, item.capturedAt);
       driveFileIds.push(fileId);
     }
 
@@ -427,6 +463,19 @@ function setupMasterSheets() {
     Logger.log('✅ アップロードログシートを作成しました');
   } else {
     Logger.log('ℹ️ アップロードログシートは既に存在します');
+  }
+
+  // --- 撮影記録 ---
+  let captureSheet = ss.getSheetByName('撮影記録');
+  if (!captureSheet) {
+    captureSheet = ss.insertSheet('撮影記録');
+    captureSheet.appendRow([
+      'タイムスタンプ', '会社名', '支払い方法', 'グループ名', '金額', 'メモ', '撮影日時', 'Drive File ID'
+    ]);
+    captureSheet.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
+    Logger.log('✅ 撮影記録シートを作成しました');
+  } else {
+    Logger.log('ℹ️ 撮影記録シートは既に存在します');
   }
 
   // デフォルトの「シート1」を削除

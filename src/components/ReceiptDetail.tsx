@@ -164,6 +164,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
         amount: currentReceipt.amount ?? 1,
         memo: currentReceipt.memo,
         capturedAt: currentReceipt.createdAt,
+        driveFileId: currentReceipt.driveFileId,
       }], requestId);
 
       const result = results[0];

@@ -156,6 +156,7 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
         amount: r.amount ?? 1,
         memo: r.memo,
         capturedAt: r.createdAt,
+        driveFileId: r.driveFileId,
       }));
 
       const results = await uploadReceipts(items, requestId);

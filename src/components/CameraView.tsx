@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { saveReceipt, getExistingGroupNames } from '../db';
 import type { Company, PaymentMethod } from '../db';
-import { getCachedCompanies, getCachedPaymentMethods } from '../api';
+import { getCachedCompanies, getCachedPaymentMethods, backupReceiptInBackground } from '../api';
 import ButtonPicker from './ButtonPicker';
 
 interface CameraViewProps {
@@ -104,7 +104,7 @@ export default function CameraView({ onCapture }: CameraViewProps) {
       setIsProcessing(true);
       try {
         const amount = amountInput ? parseInt(amountInput, 10) : 1;
-        await saveReceipt(
+        const receiptId = await saveReceipt(
           file,
           selectedPayment.id,
           selectedPayment.name,
@@ -115,6 +115,10 @@ export default function CameraView({ onCapture }: CameraViewProps) {
         );
         setCaptureCount((prev) => prev + 1);
         setAmountInput('');
+
+        // 撮影直後、アップロードボタンを待たずにバックグラウンドでDriveへバックアップする
+        // （ベストエフォート。失敗しても撮影自体には影響させず、次回起動時に再試行する）
+        void backupReceiptInBackground(receiptId);
 
         const url = URL.createObjectURL(file);
         setLastCaptured(url);
