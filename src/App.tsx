@@ -28,6 +28,17 @@ export default function App() {
     setRefreshKey((prev) => prev + 1);
   }, []);
 
+  // 起動時にストレージの永続化をOSへ要求する。
+  // iOSは空き容量が減るとサイトデータ（合言葉・未アップロード領収書）を予告なく
+  // 削除することがあるため、自動削除の対象から外すよう登録する（保証ではなく強い要求）。
+  useEffect(() => {
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().then((granted) => {
+        console.log('storage.persist:', granted ? 'granted' : 'denied');
+      });
+    }
+  }, []);
+
   // 起動時にAPIキー（合言葉）が未設定なら入力を求める
   // （GAS側のScript Properties「API_KEY」と一致しないと全APIが拒否される）
   useEffect(() => {
