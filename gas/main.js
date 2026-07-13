@@ -85,24 +85,117 @@ function doPost(e) {
  * PWA側のローカルデータが失われても、ここで残した記録から内容を追跡・復旧できるようにする。
  */
 function backupReceipt(body) {
-  const companies = getCompanies();
-  const company = companies.find(c => c.id === body.companyId);
-  const companyName = company ? company.name : (body.companyName || '未分類');
+  const backupId = body.backupId || '';
 
-  const driveFileId = saveImageToDrive(body.imageBase64, body.mimeType, companyName, body.capturedAt);
+  // 「既存チェック→Drive保存→記録」を直列化し、同じbackupIdの並行リクエストが
+  // 二重にDriveファイルを作らないようにする（iOS停止時の再送信が並行しても安全）。
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    // 既にこのbackupIdでバックアップ済みなら、新規作成せず既存のDriveファイルIDを返す（冪等）
+    if (backupId) {
+      const existing = findCaptureRecordByBackupId(backupId);
+      if (existing) {
+        return { driveFileId: existing, deduped: true };
+      }
+    }
 
-  appendCaptureRecord({
-    timestamp: new Date().toISOString(),
-    companyName: companyName,
-    paymentMethod: body.paymentMethodName || '',
-    groupName: body.groupName || '',
-    amount: body.amount || '',
-    memo: body.memo || '',
-    capturedAt: body.capturedAt || '',
-    driveFileId: driveFileId,
+    const companies = getCompanies();
+    const company = companies.find(c => c.id === body.companyId);
+    const companyName = company ? company.name : (body.companyName || '未分類');
+
+    const driveFileId = saveImageToDrive(body.imageBase64, body.mimeType, companyName, body.capturedAt);
+
+    appendCaptureRecord({
+      timestamp: new Date().toISOString(),
+      companyName: companyName,
+      paymentMethod: body.paymentMethodName || '',
+      groupName: body.groupName || '',
+      amount: body.amount || '',
+      memo: body.memo || '',
+      capturedAt: body.capturedAt || '',
+      driveFileId: driveFileId,
+      backupId: backupId,
+    });
+
+    return { driveFileId: driveFileId };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * 【手動実行用】撮影記録シートの重複を掃除する。
+ * GASエディタで「dedupeCaptureRecords」を選択して ▶ 実行。
+ *
+ * 同一レシート（backupId、無い旧行は 撮影日時+金額+会社名 で判定）が複数行ある場合、
+ * 最古の1件を残して余剰行のDriveファイルをゴミ箱へ移動し、シート行を削除する。
+ * - freee登録に使ったDriveファイル（アップロードログに載っているID）は絶対に消さない。
+ * - Driveはゴミ箱へ移動するだけ（30日間は復元可能）。freeeには一切触れない。
+ */
+function dedupeCaptureRecords() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName('撮影記録');
+  if (!sheet) { Logger.log('撮影記録シートがありません'); return; }
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow < 2) { Logger.log('データ行がありません'); return; }
+
+  // アップロードログで使用済みのDriveファイルIDを集める（これらは絶対に消さない）
+  const usedDriveIds = {};
+  const logSheet = ss.getSheetByName('アップロードログ');
+  if (logSheet && logSheet.getLastRow() >= 2) {
+    const logData = logSheet.getRange(2, 6, logSheet.getLastRow() - 1, 1).getValues(); // 6列目=Drive File ID
+    logData.forEach(function(r) { if (r[0]) usedDriveIds[String(r[0])] = true; });
+  }
+
+  const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  // グループごとに行番号を集める（行番号はシート上の実番号 = i+2）
+  const groups = {};
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    const backupId = lastCol >= 9 ? String(row[8] || '') : '';
+    const key = backupId || (String(row[6]) + '|' + String(row[4]) + '|' + String(row[1])); // 撮影日時|金額|会社名
+    if (!groups[key]) groups[key] = [];
+    groups[key].push({ sheetRow: i + 2, timestamp: String(row[0]), driveFileId: String(row[7] || '') });
+  }
+
+  const rowsToDelete = [];
+  let trashed = 0;
+  let keptUsed = 0;
+
+  Object.keys(groups).forEach(function(key) {
+    const rows = groups[key];
+    if (rows.length <= 1) return;
+    // 最古（タイムスタンプ昇順の先頭）を残す
+    rows.sort(function(a, b) { return a.timestamp < b.timestamp ? -1 : 1; });
+    const keep = rows[0];
+    for (let j = 1; j < rows.length; j++) {
+      const dup = rows[j];
+      // freeeで使ったファイル、または残す行と同じファイルは消さない（行だけ削除）
+      if (dup.driveFileId && dup.driveFileId !== keep.driveFileId && !usedDriveIds[dup.driveFileId]) {
+        try {
+          DriveApp.getFileById(dup.driveFileId).setTrashed(true);
+          trashed++;
+          Logger.log('🗑️ ゴミ箱へ移動: ' + dup.driveFileId + ' (key=' + key + ')');
+        } catch (e) {
+          Logger.log('⚠️ Drive移動失敗(既に無い等): ' + dup.driveFileId + ' / ' + e.message);
+        }
+      } else if (usedDriveIds[dup.driveFileId]) {
+        keptUsed++;
+        Logger.log('🔒 freee使用中のため保持: ' + dup.driveFileId);
+      }
+      rowsToDelete.push(dup.sheetRow);
+    }
   });
 
-  return { driveFileId };
+  // 行削除は下から（大きい行番号から）行うとインデックスがずれない
+  rowsToDelete.sort(function(a, b) { return b - a; });
+  rowsToDelete.forEach(function(r) { sheet.deleteRow(r); });
+
+  Logger.log('🎉 完了: ' + rowsToDelete.length + '行を削除、' + trashed + '件をゴミ箱へ移動、' +
+    keptUsed + '件はfreee使用中のため保持しました。');
 }
 
 /**
@@ -494,9 +587,9 @@ function setupMasterSheets() {
   if (!captureSheet) {
     captureSheet = ss.insertSheet('撮影記録');
     captureSheet.appendRow([
-      'タイムスタンプ', '会社名', '支払い方法', 'グループ名', '金額', 'メモ', '撮影日時', 'Drive File ID'
+      'タイムスタンプ', '会社名', '支払い方法', 'グループ名', '金額', 'メモ', '撮影日時', 'Drive File ID', 'Backup ID'
     ]);
-    captureSheet.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
+    captureSheet.getRange(1, 1, 1, 9).setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
     Logger.log('✅ 撮影記録シートを作成しました');
   } else {
     Logger.log('ℹ️ 撮影記録シートは既に存在します');

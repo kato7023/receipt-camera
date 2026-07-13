@@ -1,6 +1,22 @@
 import Dexie, { type Table } from 'dexie';
 
 /**
+ * 一意なID（UUID v4相当）を生成する。
+ * api.ts の generateUploadRequestId と同等だが、api.ts が db.ts を import しており
+ * 循環参照になるため、こちら側にも独立して置く。
+ */
+export function generateId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/**
  * 領収書レコード
  */
 export interface Receipt {
@@ -40,6 +56,12 @@ export interface Receipt {
   // アップロードボタンを押す前の時点で撮影直後に非同期でバックアップを試みる。
   // アップロード時、これが設定済みならGAS側でDriveへの再アップロードをスキップして再利用する。
   driveFileId: string | null;
+
+  // 撮影時点で発番する、この領収書に固定の一意なID。
+  // バックアップ送信ごとにGASへ渡し、GASはこのIDで撮影記録シートを照会して
+  // 既にバックアップ済みなら新しいDriveファイルを作らず既存のものを返す（冪等化）。
+  // iOSのバックグラウンド停止でdriveFileId保存が失われても、Driveが重複しないようにするため。
+  backupId: string | null;
 
   memo: string;
 }
@@ -146,6 +168,7 @@ export async function saveReceipt(
     uploadRequestId: null,
     uploadRequestIndex: null,
     driveFileId: null,
+    backupId: generateId(),
     memo: '',
   });
   return id as number;
@@ -255,6 +278,16 @@ export async function updateReceiptDriveFileId(
   driveFileId: string
 ): Promise<void> {
   await updateReceiptFields([id], { driveFileId });
+}
+
+/**
+ * backupId 未設定の旧レコードに、あとから backupId を発番して保存する
+ */
+export async function updateReceiptBackupId(
+  id: number,
+  backupId: string
+): Promise<void> {
+  await updateReceiptFields([id], { backupId });
 }
 
 /**

@@ -758,6 +758,9 @@ body {
   grid-template-columns: repeat(3, 1fr);
   gap: var(--space-sm);
   align-content: start;
+  /* 各行はカードの自然な高さに固定し、枚数が増えても縮まないようにする
+     （6枚時のサイズが規定値。超過分はグリッド内スクロールで見る）*/
+  grid-auto-rows: max-content;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -795,6 +798,7 @@ body {
   position: relative;
   aspect-ratio: 3 / 4;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .receipt-card-image img {

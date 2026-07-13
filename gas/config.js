@@ -207,9 +207,12 @@ function appendCaptureRecord(entry) {
   if (!sheet) {
     sheet = ss.insertSheet('撮影記録');
     sheet.appendRow([
-      'タイムスタンプ', '会社名', '支払い方法', 'グループ名', '金額', 'メモ', '撮影日時', 'Drive File ID'
+      'タイムスタンプ', '会社名', '支払い方法', 'グループ名', '金額', 'メモ', '撮影日時', 'Drive File ID', 'Backup ID'
     ]);
-    sheet.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
+    sheet.getRange(1, 1, 1, 9).setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
+  } else if (sheet.getLastColumn() < 9) {
+    // 既存シートに Backup ID 列を追加（自己修復。何度呼ばれても安全）
+    sheet.getRange(1, 9, 1, 1).setValues([['Backup ID']]);
   }
 
   sheet.appendRow([
@@ -221,7 +224,34 @@ function appendCaptureRecord(entry) {
     entry.memo,
     entry.capturedAt,
     entry.driveFileId,
+    entry.backupId || '',
   ]);
+}
+
+/**
+ * backupIdをキーに「撮影記録」シートを検索し、既にバックアップ済みなら
+ * そのDriveファイルIDを返す（見つからなければ null）。
+ * backupReceipt の冪等化に使う（同じレシートを二重にDriveへ保存しないため）。
+ */
+function findCaptureRecordByBackupId(backupId) {
+  if (!backupId) return null;
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName('撮影記録');
+  if (!sheet) return null;
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+  if (sheet.getLastColumn() < 9) return null; // Backup ID 列がまだ無い
+
+  // 8列目=Drive File ID, 9列目=Backup ID
+  const data = sheet.getRange(2, 8, lastRow - 1, 2).getValues();
+  for (const row of data) {
+    if (String(row[1]) === String(backupId)) {
+      const driveFileId = String(row[0] || '');
+      if (driveFileId) return driveFileId;
+    }
+  }
+  return null;
 }
 
 /**

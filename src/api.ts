@@ -3,7 +3,7 @@
  */
 
 
-import { db, updateUploadStatus, updateReceiptDriveFileId } from './db';
+import { db, updateUploadStatus, updateReceiptDriveFileId, updateReceiptBackupId, generateId } from './db';
 import type { Company, PaymentMethod, Receipt } from './db';
 
 // GAS Web App のデプロイ URL（セットアップ時に設定）
@@ -429,13 +429,29 @@ export async function reconcilePendingUploads(): Promise<void> {
  * freeeへは一切アクセスせず、Drive保存と「撮影記録」シートへの記録のみ行う。
  * 成功したらdriveFileIdをローカルに保存し、実際のアップロード時にDriveへの再保存を避ける。
  */
+// このセッションでバックアップ処理中のreceiptId。並行に同じレシートを
+// 二重送信しないためのガード（backupPendingReceiptsのPromise.allや、
+// 撮影直後発火と起動時再試行が重なるケースで効く）。
+const inFlightBackups = new Set<number>();
+
 export async function backupReceiptInBackground(receiptId: number): Promise<void> {
+  if (inFlightBackups.has(receiptId)) return;
+  inFlightBackups.add(receiptId);
   try {
     const receipt = await db.receipts.get(receiptId);
     if (!receipt || receipt.driveFileId) return;
 
     const baseUrl = getBaseUrl();
     if (!baseUrl) return;
+
+    // backupId は撮影時に発番済みだが、それ以前の旧レコードには無いので補完する。
+    // GASはこのIDで撮影記録シートを照会し、既にバックアップ済みなら新規Driveファイルを
+    // 作らず既存のものを返す（冪等化）。iOS停止でdriveFileId保存が失われても重複しない。
+    let backupId = receipt.backupId;
+    if (!backupId) {
+      backupId = generateId();
+      await updateReceiptBackupId(receiptId, backupId);
+    }
 
     const imageBase64 = await blobToBase64(receipt.image);
     const response = await fetch(baseUrl, {
@@ -444,6 +460,7 @@ export async function backupReceiptInBackground(receiptId: number): Promise<void
       body: JSON.stringify({
         action: 'backupReceipt',
         apiKey: getStoredApiKey(),
+        backupId,
         imageBase64,
         mimeType: receipt.image.type || 'image/jpeg',
         companyId: receipt.companyId,
@@ -463,6 +480,8 @@ export async function backupReceiptInBackground(receiptId: number): Promise<void
   } catch (err) {
     // オフライン等で失敗しても、次回起動時にbackupPendingReceiptsが再試行する
     console.error('backupReceiptInBackground failed for', receiptId, err);
+  } finally {
+    inFlightBackups.delete(receiptId);
   }
 }
 
