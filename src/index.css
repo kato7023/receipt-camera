@@ -757,8 +757,11 @@ body {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: var(--space-sm);
+  align-content: start;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding-bottom: var(--space-md);
+  padding-bottom: var(--space-sm);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -957,21 +960,15 @@ body {
 }
 
 /* ---------- Batch Action Bar ---------- */
+/* グリッドの下に通常配置（fixedで浮かせるとグリッド末尾の行が隠れるため） */
 .batch-action-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-md);
-  padding-bottom: calc(var(--safe-bottom) + var(--space-md) + 56px);
-  background: linear-gradient(transparent, var(--bg-secondary) 20%);
-  z-index: 50;
+  gap: var(--space-sm);
+  padding-top: var(--space-sm);
   animation: slideUp var(--transition-normal) ease-out;
-  max-width: 480px;
-  margin: 0 auto;
 }
 
 .batch-count {
@@ -1042,17 +1039,10 @@ body {
 }
 
 /* Upload All Bar */
+/* グリッドの下に通常配置するバー（fixedで浮かせるとグリッド末尾の行が隠れるため） */
 .upload-all-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: var(--space-md);
-  padding-bottom: calc(var(--safe-bottom) + var(--space-md) + 56px);
-  background: linear-gradient(transparent, var(--bg-secondary) 20%);
-  z-index: 50;
-  max-width: 480px;
-  margin: 0 auto;
+  flex-shrink: 0;
+  padding-top: var(--space-sm);
 }
 
 .upload-all-button {
