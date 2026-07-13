@@ -147,17 +147,26 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
       }
       loadReceipts();
 
-      const items = targetReceipts.map(r => ({
-        image: r.image,
-        companyId: r.companyId!,
-        paymentMethodId: r.paymentMethodId,
-        paymentMethodName: r.paymentMethodName,
-        groupName: r.groupName,
-        amount: r.amount ?? 1,
-        memo: r.memo,
-        capturedAt: r.createdAt,
-        driveFileId: r.driveFileId,
-      }));
+      // 上記のステータス更新でレコード（画像Blob含む）はDB上で作り直されている。
+      // Safariでは書き換え前の古いBlobハンドルの読み取りが失敗することがあるため
+      // （「Blobの読み取りに失敗しました」の原因）、必ずDBから取り直した新鮮な
+      // オブジェクトの画像を使ってアップロードする。
+      const freshReceipts = await db.receipts.bulkGet(targetReceipts.map(r => r.id!));
+
+      const items = freshReceipts.map((fresh, i) => {
+        const r = fresh ?? targetReceipts[i];
+        return {
+          image: r.image,
+          companyId: r.companyId!,
+          paymentMethodId: r.paymentMethodId,
+          paymentMethodName: r.paymentMethodName,
+          groupName: r.groupName,
+          amount: r.amount ?? 1,
+          memo: r.memo,
+          capturedAt: r.createdAt,
+          driveFileId: r.driveFileId,
+        };
+      });
 
       const results = await uploadReceipts(items, requestId);
 
@@ -177,17 +186,21 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
       for (const r of targetReceipts) {
         if (r.id) await updateUploadStatus(r.id, 'error', (err as Error).message);
       }
+      // エラー→エラーの場合など画面上の変化がないと「無反応」に見えるため、必ず通知する
+      alert(`アップロードに失敗しました。\n\n${(err as Error).message}`);
     } finally {
       setIsUploading(false);
       loadReceipts();
     }
   }, [loadReceipts]);
 
-  // アップロード
+  // アップロード（未アップロード・エラーどちらも対象にする。
+  // エラータブで選択してのリトライもこの共通処理で行えるようにする）
   const handleUpload = useCallback(async () => {
     // 会社未設定のレシートがあるか確認
     const targetReceipts = receipts.filter(
-      r => r.id !== undefined && (selectedIds.size === 0 || selectedIds.has(r.id!)) && r.uploadStatus === 'pending'
+      r => r.id !== undefined && (selectedIds.size === 0 || selectedIds.has(r.id!)) &&
+        (r.uploadStatus === 'pending' || r.uploadStatus === 'error')
     );
     const noCompany = targetReceipts.filter(r => !r.companyId);
     if (noCompany.length > 0) {

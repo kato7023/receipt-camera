@@ -283,20 +283,36 @@ export async function uploadReceipts(
     throw new Error('GAS Web App URL が未設定です。SETUP.md を参照してセットアップしてください。');
   }
 
-  // 画像を Base64 に変換
+  // 画像を Base64 に変換。
+  // ローカルのBlobが読めなくても、撮影直後バックアップ済み（driveFileIdあり）なら
+  // GAS側がDrive上のファイルを再利用するため、画像なしで続行できる（救済経路）。
   const receipts: UploadReceiptItem[] = await Promise.all(
-    items.map(async (item) => ({
-      imageBase64: await blobToBase64(item.image),
-      mimeType: item.image.type || 'image/jpeg',
-      companyId: item.companyId,
-      paymentMethodId: item.paymentMethodId,
-      paymentMethodName: item.paymentMethodName,
-      groupName: item.groupName,
-      amount: item.amount > 0 ? item.amount : 1,
-      memo: item.memo,
-      capturedAt: item.capturedAt.toISOString(),
-      driveFileId: item.driveFileId ?? null,
-    }))
+    items.map(async (item) => {
+      let imageBase64 = '';
+      try {
+        imageBase64 = await blobToBase64(item.image);
+      } catch (err) {
+        if (!item.driveFileId) {
+          throw new Error(
+            '画像の読み取りに失敗しました。Driveバックアップも未完了のため送信できません。' +
+            '（詳細: ' + (err as Error).message + '）'
+          );
+        }
+        console.warn('blobToBase64 failed; falling back to backed-up driveFileId:', item.driveFileId);
+      }
+      return {
+        imageBase64,
+        mimeType: item.image.type || 'image/jpeg',
+        companyId: item.companyId,
+        paymentMethodId: item.paymentMethodId,
+        paymentMethodName: item.paymentMethodName,
+        groupName: item.groupName,
+        amount: item.amount > 0 ? item.amount : 1,
+        memo: item.memo,
+        capturedAt: item.capturedAt.toISOString(),
+        driveFileId: item.driveFileId ?? null,
+      };
+    })
   );
 
   // fetch自体やレスポンス読み取りの失敗は「サーバーの応答を確認できなかった」だけで、

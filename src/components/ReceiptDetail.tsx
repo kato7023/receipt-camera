@@ -155,16 +155,21 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
       await updateUploadStatus(receipt.id, 'uploading', null, requestId, 0);
       await loadReceiptData();
 
+      // ステータス更新でレコード（画像Blob含む）はDB上で作り直されている。
+      // Safariでは古いBlobハンドルの読み取りが失敗することがあるため、
+      // 必ずDBから取り直した新鮮なオブジェクトの画像を使う。
+      const fresh = (await db.receipts.get(receipt.id)) ?? currentReceipt;
+
       const results = await uploadReceipts([{
-        image: currentReceipt.image,
-        companyId: currentReceipt.companyId!,
-        paymentMethodId: currentReceipt.paymentMethodId,
-        paymentMethodName: currentReceipt.paymentMethodName,
-        groupName: currentReceipt.groupName,
-        amount: currentReceipt.amount ?? 1,
-        memo: currentReceipt.memo,
-        capturedAt: currentReceipt.createdAt,
-        driveFileId: currentReceipt.driveFileId,
+        image: fresh.image,
+        companyId: fresh.companyId!,
+        paymentMethodId: fresh.paymentMethodId,
+        paymentMethodName: fresh.paymentMethodName,
+        groupName: fresh.groupName,
+        amount: fresh.amount ?? 1,
+        memo: fresh.memo,
+        capturedAt: fresh.createdAt,
+        driveFileId: fresh.driveFileId,
       }], requestId);
 
       const result = results[0];
