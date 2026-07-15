@@ -18,11 +18,18 @@ function doGet(e) {
 
     let data;
 
+    // forceRefresh=1 なら、PropertiesServiceのマスタキャッシュ（180日）を先に破棄して
+    // スプレッドシートから読み直す（アプリの設定画面「マスタを今すぐ更新」から使用。
+    // 以前はGASエディタでrefreshMasterCacheを手動実行する必要があった作業の代替）
+    const forceRefresh = e.parameter.forceRefresh === '1';
+
     switch (action) {
       case 'companies':
+        if (forceRefresh) PropertiesService.getScriptProperties().deleteProperty('CACHE_COMPANIES');
         data = getCompanies();
         break;
       case 'paymentMethods':
+        if (forceRefresh) PropertiesService.getScriptProperties().deleteProperty('CACHE_PAYMENT_METHODS');
         data = getPaymentMethods();
         break;
       case 'uploadStatus':

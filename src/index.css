@@ -123,13 +123,100 @@ body {
   color: var(--accent-amber);
 }
 
-.app-version {
+.header-right {
   position: absolute;
   right: var(--space-md);
-  bottom: 2px;
+  top: calc(var(--safe-top) + var(--space-md));
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.settings-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xs);
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-button:active {
+  transform: scale(0.9);
+  color: var(--accent-amber);
+}
+
+.app-version {
   font-size: 0.625rem;
   color: var(--text-muted);
   opacity: 0.6;
+  font-family: monospace;
+}
+
+/* ---------- Settings Modal ---------- */
+.settings-section {
+  margin-bottom: var(--space-lg);
+}
+
+.settings-action-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: linear-gradient(135deg, var(--accent-blue), #2563EB);
+  border: none;
+  border-radius: var(--radius-md);
+  color: white;
+  font-family: var(--font-family);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-action-button:active {
+  transform: scale(0.97);
+}
+
+.settings-action-button:disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.settings-action-button.secondary {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.settings-hint {
+  margin-top: var(--space-sm);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+.settings-message {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--accent-amber-subtle);
+  color: var(--accent-amber);
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+}
+
+.settings-info {
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.75rem;
+  color: var(--text-muted);
   font-family: monospace;
 }
 

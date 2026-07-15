@@ -106,15 +106,18 @@ function clearApiKeyIfInvalid(errorMessage: string | undefined): void {
 
 /**
  * 会社一覧を取得
+ * @param forceRefresh trueならGAS側のマスタキャッシュも強制クリアしてスプシから読み直す
  */
-export async function fetchCompanies(): Promise<Company[]> {
+export async function fetchCompanies(forceRefresh = false): Promise<Company[]> {
   const baseUrl = getBaseUrl();
   if (!baseUrl) {
     console.warn('GAS Web App URL が未設定です。SETUP.md を参照してください。');
     return [];
   }
 
-  const response = await fetch(`${baseUrl}?action=companies&apiKey=${encodeURIComponent(getStoredApiKey())}`);
+  const response = await fetch(
+    `${baseUrl}?action=companies&apiKey=${encodeURIComponent(getStoredApiKey())}${forceRefresh ? '&forceRefresh=1' : ''}`
+  );
   const json: ApiResponse<Company[]> = await response.json();
 
   if (!json.success || !json.data) {
@@ -127,15 +130,18 @@ export async function fetchCompanies(): Promise<Company[]> {
 
 /**
  * 支払い方法一覧を取得
+ * @param forceRefresh trueならGAS側のマスタキャッシュも強制クリアしてスプシから読み直す
  */
-export async function fetchPaymentMethods(): Promise<PaymentMethod[]> {
+export async function fetchPaymentMethods(forceRefresh = false): Promise<PaymentMethod[]> {
   const baseUrl = getBaseUrl();
   if (!baseUrl) {
     console.warn('GAS Web App URL が未設定です。SETUP.md を参照してください。');
     return getDefaultPaymentMethods();
   }
 
-  const response = await fetch(`${baseUrl}?action=paymentMethods&apiKey=${encodeURIComponent(getStoredApiKey())}`);
+  const response = await fetch(
+    `${baseUrl}?action=paymentMethods&apiKey=${encodeURIComponent(getStoredApiKey())}${forceRefresh ? '&forceRefresh=1' : ''}`
+  );
   const json: ApiResponse<PaymentMethod[]> = await response.json();
 
   if (!json.success || !json.data) {
@@ -499,62 +505,98 @@ export async function backupPendingReceipts(): Promise<void> {
 }
 
 /**
- * マスタデータをキャッシュから取得、なければAPIから取得
+ * マスタデータのキャッシュ（Stale-While-Revalidate方式）。
+ *
+ * 起動高速化のため、キャッシュがあれば年齢を問わず即座に返して画面をブロックしない。
+ * 古いキャッシュを返した場合は、裏でGASから最新を取得してキャッシュだけ差し替える
+ * （次回起動から反映。セッション中のUI差し替えは行わず、選択状態を壊さない）。
+ * マスタは年に数回しか変わらないため、この設計で実用上の鮮度は十分。
+ * スプシ編集を即時反映したい場合は設定画面の「マスタを今すぐ更新」を使う。
  */
 const CACHE_KEY_COMPANIES = 'cache_companies';
 const CACHE_KEY_PAYMENT_METHODS = 'cache_paymentMethods';
-const CACHE_DURATION = 1000 * 60 * 30; // 30分
+// キャッシュがこの時間より古ければ、即時返却した後にバックグラウンドで再取得する
+const REVALIDATE_AFTER_MS = 1000 * 60 * 5;
 
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
 }
 
-export async function getCachedCompanies(): Promise<Company[]> {
-  const cached = localStorage.getItem(CACHE_KEY_COMPANIES);
-  if (cached) {
-    const entry: CacheEntry<Company[]> = JSON.parse(cached);
-    if (Date.now() - entry.timestamp < CACHE_DURATION) {
-      return entry.data;
-    }
-  }
-
+function readCache<T>(key: string): CacheEntry<T> | null {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
   try {
-    const data = await fetchCompanies();
-    localStorage.setItem(
-      CACHE_KEY_COMPANIES,
-      JSON.stringify({ data, timestamp: Date.now() })
-    );
-    return data;
+    return JSON.parse(raw) as CacheEntry<T>;
   } catch {
-    // APIエラー時はキャッシュがあれば返す
-    if (cached) {
-      return (JSON.parse(cached) as CacheEntry<Company[]>).data;
-    }
-    return [];
+    return null;
   }
 }
 
-export async function getCachedPaymentMethods(): Promise<PaymentMethod[]> {
-  const cached = localStorage.getItem(CACHE_KEY_PAYMENT_METHODS);
+function writeCache<T>(key: string, data: T): void {
+  localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
+}
+
+// バックグラウンド再取得の多重発火防止（同一セッション内）
+const revalidatingKeys = new Set<string>();
+
+async function getCachedMaster<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  fallback: T
+): Promise<T> {
+  const cached = readCache<T>(key);
+
   if (cached) {
-    const entry: CacheEntry<PaymentMethod[]> = JSON.parse(cached);
-    if (Date.now() - entry.timestamp < CACHE_DURATION) {
-      return entry.data;
+    // 即時返却。古ければ裏で更新（fire-and-forget、失敗は無視して次回に任せる）
+    if (Date.now() - cached.timestamp > REVALIDATE_AFTER_MS && !revalidatingKeys.has(key)) {
+      revalidatingKeys.add(key);
+      fetcher()
+        .then((data) => writeCache(key, data))
+        .catch((err) => console.warn('マスタのバックグラウンド更新に失敗:', key, err))
+        .finally(() => revalidatingKeys.delete(key));
     }
+    return cached.data;
   }
 
+  // キャッシュが無い初回起動のみ、取得完了を待つ
   try {
-    const data = await fetchPaymentMethods();
-    localStorage.setItem(
-      CACHE_KEY_PAYMENT_METHODS,
-      JSON.stringify({ data, timestamp: Date.now() })
-    );
+    const data = await fetcher();
+    writeCache(key, data);
     return data;
   } catch {
-    if (cached) {
-      return (JSON.parse(cached) as CacheEntry<PaymentMethod[]>).data;
-    }
-    return getDefaultPaymentMethods();
+    return fallback;
   }
+}
+
+export async function getCachedCompanies(): Promise<Company[]> {
+  return getCachedMaster(CACHE_KEY_COMPANIES, () => fetchCompanies(), []);
+}
+
+export async function getCachedPaymentMethods(): Promise<PaymentMethod[]> {
+  return getCachedMaster(CACHE_KEY_PAYMENT_METHODS, () => fetchPaymentMethods(), getDefaultPaymentMethods());
+}
+
+/**
+ * 設定画面用: GAS側のマスタキャッシュ（PropertiesService・180日）も強制クリアした上で
+ * 最新マスタを取得し直し、ローカルキャッシュを差し替える。
+ * スプレッドシートのマスタを編集した直後に反映させたいときに使う。
+ * @returns 取得できた件数（完了メッセージ表示用）
+ */
+export async function forceRefreshMasters(): Promise<{ companies: number; paymentMethods: number }> {
+  const [companies, paymentMethods] = await Promise.all([
+    fetchCompanies(true),
+    fetchPaymentMethods(true),
+  ]);
+  writeCache(CACHE_KEY_COMPANIES, companies);
+  writeCache(CACHE_KEY_PAYMENT_METHODS, paymentMethods);
+  return { companies: companies.length, paymentMethods: paymentMethods.length };
+}
+
+/**
+ * 設定画面用: 保存済みの合言葉（APIキー）を破棄して再入力を求める
+ */
+export function resetApiKey(): void {
+  localStorage.removeItem(API_KEY_STORAGE);
+  ensureApiKey();
 }
