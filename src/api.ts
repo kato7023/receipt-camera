@@ -43,6 +43,9 @@ interface UploadReceiptItem {
   // 撮影直後のバックグラウンドバックアップで既にDriveへ保存済みならそのファイルID。
   // GAS側はこれがあればDriveへの再保存をスキップして再利用する
   driveFileId?: string | null;
+  // レシート固有ID。driveFileIdが未保存でも、GAS側はこれで撮影記録シートを照会し、
+  // バックアップ済み（または処理中に完了した）Driveファイルへ収束させる（重複作成防止）
+  backupId?: string | null;
 }
 
 /**
@@ -281,6 +284,7 @@ export async function uploadReceipts(
     memo: string;
     capturedAt: Date;
     driveFileId?: string | null;
+    backupId?: string | null;
   }[],
   requestId: string
 ): Promise<UploadResult[]> {
@@ -317,6 +321,7 @@ export async function uploadReceipts(
         memo: item.memo,
         capturedAt: item.capturedAt.toISOString(),
         driveFileId: item.driveFileId ?? null,
+        backupId: item.backupId ?? null,
       };
     })
   );
@@ -383,6 +388,10 @@ export async function reconcilePendingUploads(): Promise<void> {
       for (const result of results) {
         const receipt = byIndex.get(result.receiptIndex);
         if (!receipt?.id) continue;
+        // Drive保存済みのファイルIDは成否によらず保存し、リトライ時の再作成・再送信を防ぐ
+        if (result.driveFileId && !receipt.driveFileId) {
+          await updateReceiptDriveFileId(receipt.id, result.driveFileId);
+        }
         if (result.status === 'completed') {
           await updateUploadStatus(receipt.id, 'completed');
         } else {

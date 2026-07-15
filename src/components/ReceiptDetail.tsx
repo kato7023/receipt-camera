@@ -6,6 +6,7 @@ import {
   db,
   updateReceiptMemo,
   updateUploadStatus,
+  updateReceiptDriveFileId,
   deleteReceipt,
   updateReceiptsCompany,
   updateReceiptGroup,
@@ -170,9 +171,14 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
         memo: fresh.memo,
         capturedAt: fresh.createdAt,
         driveFileId: fresh.driveFileId,
+        backupId: fresh.backupId,
       }], requestId);
 
       const result = results[0];
+      // Drive保存済みのファイルIDは成否によらず保存し、リトライ時の再作成・再送信を防ぐ
+      if (result?.driveFileId && !fresh.driveFileId) {
+        await updateReceiptDriveFileId(receipt.id, result.driveFileId);
+      }
       if (result?.status === 'completed') {
         await updateUploadStatus(receipt.id, 'completed');
       } else {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, updateReceiptGroup, updateReceiptsCompany, updateUploadStatus, deleteReceipts } from '../db';
+import { db, updateReceiptGroup, updateReceiptsCompany, updateUploadStatus, updateReceiptDriveFileId, deleteReceipts } from '../db';
 import type { Receipt, Company } from '../db';
 import { getCachedCompanies, uploadReceipts, generateUploadRequestId } from '../api';
 import CompanyAssigner from './CompanyAssigner';
@@ -165,6 +165,7 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
           memo: r.memo,
           capturedAt: r.createdAt,
           driveFileId: r.driveFileId,
+          backupId: r.backupId,
         };
       });
 
@@ -174,6 +175,10 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
       for (const result of results) {
         const receipt = targetReceipts[result.receiptIndex];
         if (receipt?.id) {
+          // Drive保存済みのファイルIDは成否によらず保存し、リトライ時の再作成・再送信を防ぐ
+          if (result.driveFileId && !receipt.driveFileId) {
+            await updateReceiptDriveFileId(receipt.id, result.driveFileId);
+          }
           if (result.status === 'completed') {
             await updateUploadStatus(receipt.id, 'completed');
           } else {

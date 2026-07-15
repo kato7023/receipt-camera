@@ -92,40 +92,66 @@ function doPost(e) {
  * PWA側のローカルデータが失われても、ここで残した記録から内容を追跡・復旧できるようにする。
  */
 function backupReceipt(body) {
-  const backupId = body.backupId || '';
+  const companies = getCompanies();
+  const company = companies.find(c => c.id === body.companyId);
+  const companyName = company ? company.name : (body.companyName || '未分類');
 
-  // 「既存チェック→Drive保存→記録」を直列化し、同じbackupIdの並行リクエストが
-  // 二重にDriveファイルを作らないようにする（iOS停止時の再送信が並行しても安全）。
+  const driveFileId = getOrCreateDriveFile(
+    body.backupId || '',
+    body.imageBase64,
+    body.mimeType,
+    companyName,
+    body.capturedAt,
+    {
+      paymentMethodName: body.paymentMethodName,
+      groupName: body.groupName,
+      amount: body.amount,
+      memo: body.memo,
+    }
+  );
+
+  return { driveFileId: driveFileId };
+}
+
+/**
+ * Driveファイル作成の冪等ゲート。
+ * レシート画像のDrive保存は、バックアップ・アップロードどちらの経路でも必ずここを通すこと。
+ * backupIdで撮影記録シートを照会し、既に保存済みなら新規作成せず既存のdriveFileIdを返す。
+ * LockServiceで「照会→作成→記録」を直列化するため、バックアップとアップロードが
+ * どんな順序・並行度で走っても、1つのbackupIdに対してDriveファイルは1つしか生まれない。
+ * @param {string} backupId レシート固有ID（空なら照会不能のため従来通り作成のみ）
+ * @param {Object} meta 撮影記録シートに残す付随情報（paymentMethodName/groupName/amount/memo）
+ * @returns {string} driveFileId
+ */
+function getOrCreateDriveFile(backupId, imageBase64, mimeType, companyName, capturedAt, meta) {
+  if (!backupId) {
+    // backupIdの無い旧データは重複判定できないので従来動作（作成のみ）
+    return saveImageToDrive(imageBase64, mimeType, companyName, capturedAt);
+  }
+
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    // 既にこのbackupIdでバックアップ済みなら、新規作成せず既存のDriveファイルIDを返す（冪等）
-    if (backupId) {
-      const existing = findCaptureRecordByBackupId(backupId);
-      if (existing) {
-        return { driveFileId: existing, deduped: true };
-      }
+    const existing = findCaptureRecordByBackupId(backupId);
+    if (existing) {
+      return existing;
     }
 
-    const companies = getCompanies();
-    const company = companies.find(c => c.id === body.companyId);
-    const companyName = company ? company.name : (body.companyName || '未分類');
-
-    const driveFileId = saveImageToDrive(body.imageBase64, body.mimeType, companyName, body.capturedAt);
+    const driveFileId = saveImageToDrive(imageBase64, mimeType, companyName, capturedAt);
 
     appendCaptureRecord({
       timestamp: new Date().toISOString(),
       companyName: companyName,
-      paymentMethod: body.paymentMethodName || '',
-      groupName: body.groupName || '',
-      amount: body.amount || '',
-      memo: body.memo || '',
-      capturedAt: body.capturedAt || '',
+      paymentMethod: (meta && meta.paymentMethodName) || '',
+      groupName: (meta && meta.groupName) || '',
+      amount: (meta && meta.amount) || '',
+      memo: (meta && meta.memo) || '',
+      capturedAt: capturedAt || '',
       driveFileId: driveFileId,
       backupId: backupId,
     });
 
-    return { driveFileId: driveFileId };
+    return driveFileId;
   } finally {
     lock.releaseLock();
   }
@@ -326,10 +352,13 @@ function processSingleReceipt(index, item, companies, requestId) {
   let freeeReceiptId = '';
 
   try {
-    // Step 1: Drive に保存（撮影直後のバックグラウンドバックアップで既に保存済みならそれを再利用し、
-    // 同じ画像をDriveへ二重に保存しない。未保存（バックアップ失敗等）の場合はここで保存する）
+    // Step 1: Drive に保存。冪等ゲート経由なので、バックアップが並行・先行していても
+    // 同じ画像がDriveへ二重に保存されることはない（backupIdで同一ファイルに収束する）
     if (!driveFileId) {
-      driveFileId = saveImageToDrive(item.imageBase64, item.mimeType, company.name, item.capturedAt);
+      driveFileId = getOrCreateDriveFile(
+        item.backupId || '', item.imageBase64, item.mimeType, company.name, item.capturedAt,
+        { paymentMethodName: item.paymentMethodName, groupName: item.groupName || '', amount: item.amount, memo: item.memo }
+      );
     }
 
     // Step 2: Freee に証憑アップロード
@@ -408,10 +437,13 @@ function processGroupReceipts(indices, items, companies, requestId) {
   const freeeReceiptIds = [];
 
   try {
-    // Step 1: 全画像を Drive に保存（撮影直後のバックグラウンドバックアップで
-    // 既に保存済みならそれを再利用し、同じ画像をDriveへ二重に保存しない）
+    // Step 1: 全画像を Drive に保存。冪等ゲート経由なので、バックアップが並行・先行
+    // していても同じ画像がDriveへ二重に保存されることはない
     for (const item of items) {
-      const fileId = item.driveFileId || saveImageToDrive(item.imageBase64, item.mimeType, company.name, item.capturedAt);
+      const fileId = item.driveFileId || getOrCreateDriveFile(
+        item.backupId || '', item.imageBase64, item.mimeType, company.name, item.capturedAt,
+        { paymentMethodName: item.paymentMethodName, groupName: item.groupName || '', amount: item.amount, memo: item.memo }
+      );
       driveFileIds.push(fileId);
     }
 
