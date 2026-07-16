@@ -33,13 +33,9 @@ function diagnosePhase1() {
       Logger.log('  ❌ 部門取得エラー: ' + e.message);
     }
 
-    // 2) 現金一括タグの実例
+    // 2) 現金一括タグの実例（ページング対応で全件取得）
     try {
-      const req = new FreeeAPI.Request('tags')
-        .addParam('company_id', company.freeeCompanyId)
-        .addParam('limit', 3000);
-      const response = req.requestGET();
-      const tags = (response && response.tags) || [];
+      const tags = fetchAllTags(company.freeeCompanyId);
       const cashTags = tags.filter(function(t) { return t.name && t.name.indexOf('現金一括') === 0; });
       if (cashTags.length > 0) {
         Logger.log('  ✅ 既存の現金一括タグ: ' + cashTags.map(function(t) { return t.name + '(id=' + t.id + ')'; }).join(', '));

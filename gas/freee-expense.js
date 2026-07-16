@@ -192,6 +192,28 @@ function getExecutiveSectionId(freeeCompanyId) {
  * @param {string} capturedAt 撮影日時 (ISO 8601)
  * @returns {number|null} メモタグID（失敗時はnull＝タグなしで申請を作成）
  */
+/**
+ * 事業所の全メモタグを取得する（ページング対応）。
+ * タグが3000件を超える事業所（例: ファンテック）で取得漏れ→重複タグ作成を
+ * 起こさないよう、limit件ちょうど返ってきた場合はoffsetを進めて続きを取得する。
+ */
+function fetchAllTags(freeeCompanyId) {
+  const LIMIT = 3000;
+  const MAX_PAGES = 10; // 3万件まで（安全上限）
+  let all = [];
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const req = new FreeeAPI.Request('tags')
+      .addParam('company_id', freeeCompanyId)
+      .addParam('limit', LIMIT)
+      .addParam('offset', page * LIMIT);
+    const response = req.requestGET();
+    const tags = (response && response.tags) || [];
+    all = all.concat(tags);
+    if (tags.length < LIMIT) break;
+  }
+  return all;
+}
+
 function getOrCreateCashTag(freeeCompanyId, capturedAt) {
   const yymm = Utilities.formatDate(new Date(capturedAt), 'Asia/Tokyo', 'yyMM');
   const tagName = '現金一括' + yymm;
@@ -199,12 +221,8 @@ function getOrCreateCashTag(freeeCompanyId, capturedAt) {
 
   try {
     return getCachedOrFetch(cacheKey, function() {
-      // 既存タグを検索
-      const req = new FreeeAPI.Request('tags')
-        .addParam('company_id', freeeCompanyId)
-        .addParam('limit', 3000);
-      const response = req.requestGET();
-      const tags = (response && response.tags) || [];
+      // 既存タグを全件から検索（ページング対応）
+      const tags = fetchAllTags(freeeCompanyId);
       const existing = tags.find(function(t) { return t.name === tagName; });
       if (existing) return existing.id;
 
