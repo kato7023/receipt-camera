@@ -10,8 +10,9 @@
 /**
  * 安全なAPIエンドポイントのホワイトリスト
  * ここにないエンドポイントへの POST/PUT/DELETE は拒否される
+ * tags は 2026-07-13 ユーザー承認（メモタグ新規作成のみ・破壊的変更なし。AGENTS.md参照）
  */
-var ALLOWED_POST_ENDPOINTS = ['receipts', 'expense_applications'];
+var ALLOWED_POST_ENDPOINTS = ['receipts', 'expense_applications', 'tags'];
 
 /**
  * Freee API リクエストの安全性を検証
@@ -164,6 +165,91 @@ function uploadReceiptsToFreeeBatch(driveFileIds, companyId) {
 }
 
 /**
+ * 「役員精算」部門のIDを取得する（PropertiesServiceで会社ごとにキャッシュ）。
+ * 本アプリが作成する経費申請の部門は必ず「役員精算」（ユーザー要件）。
+ * 部門が見つからない事業所では null を返し、申請は部門なしで作成する（劣化許容）。
+ * 使用エンドポイント: GET /api/1/sections（2026-07-13 ユーザー承認済み）
+ */
+function getExecutiveSectionId(freeeCompanyId) {
+  return getCachedOrFetch('CACHE_SECTION_EXEC_' + freeeCompanyId, function() {
+    const req = new FreeeAPI.Request('sections').addParam('company_id', freeeCompanyId);
+    const response = req.requestGET();
+    const sections = (response && response.sections) || [];
+    const match = sections.find(function(s) { return s.name === '役員精算'; });
+    if (!match) {
+      Logger.log('⚠️ 部門「役員精算」が見つかりません (company_id=' + freeeCompanyId + ')。部門なしで申請を作成します。');
+      return null;
+    }
+    return match.id;
+  });
+}
+
+/**
+ * 現金支払い用のメモタグ「現金一括YYMM」（例: 現金一括2607）を取得し、
+ * 存在しなければ新規作成する（撮影日基準・会社ごと）。
+ * 使用エンドポイント: GET /api/1/tags（承認済み）・POST /api/1/tags（承認済み・作成のみ）
+ * @param {number} freeeCompanyId
+ * @param {string} capturedAt 撮影日時 (ISO 8601)
+ * @returns {number|null} メモタグID（失敗時はnull＝タグなしで申請を作成）
+ */
+function getOrCreateCashTag(freeeCompanyId, capturedAt) {
+  const yymm = Utilities.formatDate(new Date(capturedAt), 'Asia/Tokyo', 'yyMM');
+  const tagName = '現金一括' + yymm;
+  const cacheKey = 'CACHE_CASH_TAG_' + freeeCompanyId + '_' + yymm;
+
+  try {
+    return getCachedOrFetch(cacheKey, function() {
+      // 既存タグを検索
+      const req = new FreeeAPI.Request('tags')
+        .addParam('company_id', freeeCompanyId)
+        .addParam('limit', 3000);
+      const response = req.requestGET();
+      const tags = (response && response.tags) || [];
+      const existing = tags.find(function(t) { return t.name === tagName; });
+      if (existing) return existing.id;
+
+      // 参考: 似た命名のタグをログに残す（表記ゆれの診断用）
+      const similar = tags.filter(function(t) { return t.name && t.name.indexOf('現金一括') === 0; });
+      if (similar.length > 0) {
+        Logger.log('ℹ️ 既存の現金一括タグ: ' + similar.map(function(t) { return t.name; }).join(', '));
+      }
+
+      // 無ければ新規作成
+      validateFreeeRequest('POST', 'tags');
+      const created = postToFreeeWithDetail('tags', { company_id: freeeCompanyId, name: tagName });
+      if (!created || !created.tag) {
+        throw new Error('メモタグ作成に失敗しました: ' + JSON.stringify(created));
+      }
+      Logger.log('✅ メモタグを新規作成: ' + tagName + ' (id=' + created.tag.id + ')');
+      return created.tag.id;
+    });
+  } catch (e) {
+    // タグの取得/作成失敗で申請作成自体を止めない（タグなしで劣化継続）
+    Logger.log('⚠️ 現金メモタグの取得/作成に失敗: ' + e.message);
+    return null;
+  }
+}
+
+/**
+ * 経費申請ペイロードに部門（役員精算）と現金メモタグを付与する共通処理。
+ * どちらも取得失敗時は付与せずに続行する（申請作成を優先）。
+ */
+function applySectionAndTags(payload, companyId, paymentMethodName, capturedAt) {
+  try {
+    const sectionId = getExecutiveSectionId(companyId);
+    if (sectionId) payload.section_id = sectionId;
+  } catch (e) {
+    Logger.log('⚠️ 部門IDの取得に失敗（部門なしで続行）: ' + e.message);
+  }
+
+  if (paymentMethodName === '現金') {
+    const tagId = getOrCreateCashTag(companyId, capturedAt);
+    if (tagId) payload.tag_ids = [tagId];
+  }
+  return payload;
+}
+
+/**
  * 経費精算の下書きを作成（個別 = 1レシート → 1明細）
  * @param {number} companyId Freee の事業所 ID
  * @param {number} receiptId Freee の証憑 ID
@@ -194,6 +280,7 @@ function createExpenseDraft(companyId, receiptId, paymentMethodName, amount, mem
       }
     ],
   };
+  applySectionAndTags(payload, companyId, paymentMethodName, capturedAt);
 
   validateFreeeRequest('POST', 'expense_applications');
   const response = postToFreeeWithDetail('expense_applications', payload);
@@ -238,6 +325,7 @@ function createGroupExpenseDraft(companyId, receiptIds, amounts, paymentMethodNa
     issue_date: transactionDate,
     purchase_lines: purchaseLines,
   };
+  applySectionAndTags(payload, companyId, paymentMethodName, capturedAt);
 
   validateFreeeRequest('POST', 'expense_applications');
   const response = postToFreeeWithDetail('expense_applications', payload);

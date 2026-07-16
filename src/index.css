@@ -985,6 +985,11 @@ body {
   font-weight: 600;
 }
 
+.receipt-amount.no-amount {
+  color: var(--accent-amber);
+  font-weight: 500;
+}
+
 .receipt-payment {
   font-size: 0.625rem;
   color: var(--accent-amber);

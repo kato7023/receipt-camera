@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, updateReceiptGroup, updateReceiptsCompany, updateUploadStatus, updateReceiptDriveFileId, deleteReceipts } from '../db';
+import { db, updateReceiptGroup, updateReceiptsCompany, updateUploadStatus, updateReceiptDriveFileId, updateReceiptFreeeIds, deleteReceipts } from '../db';
 import type { Receipt, Company } from '../db';
-import { getCachedCompanies, uploadReceipts, generateUploadRequestId } from '../api';
+import { getCachedCompanies, uploadReceipts, generateUploadRequestId, scheduleAutoUpload } from '../api';
 import CompanyAssigner from './CompanyAssigner';
 import GroupManager from './GroupManager';
 
@@ -121,6 +121,8 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
       setSelectedIds(new Set());
       setSelectMode(false);
       loadReceipts();
+      // 会社が設定されたことで保留解除された可能性があるため、自動アップロードを予約
+      scheduleAutoUpload(loadReceipts, 5000);
     }
   }, [selectedIds, loadReceipts]);
 
@@ -161,7 +163,7 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
           paymentMethodId: r.paymentMethodId,
           paymentMethodName: r.paymentMethodName,
           groupName: r.groupName,
-          amount: r.amount ?? 1,
+          amount: r.amount,
           memo: r.memo,
           capturedAt: r.createdAt,
           driveFileId: r.driveFileId,
@@ -180,6 +182,7 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
             await updateReceiptDriveFileId(receipt.id, result.driveFileId);
           }
           if (result.status === 'completed') {
+            await updateReceiptFreeeIds(receipt.id, result.freeeReceiptId ?? null, result.freeeExpenseId ?? null);
             await updateUploadStatus(receipt.id, 'completed');
           } else {
             await updateUploadStatus(receipt.id, 'error', result.error || 'アップロードに失敗しました');
@@ -246,6 +249,19 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
   const pendingCount = allReceipts.filter(r => r.uploadStatus === 'pending').length;
   const completedCount = allReceipts.filter(r => r.uploadStatus === 'completed').length;
   const errorCount = allReceipts.filter(r => r.uploadStatus === 'error').length;
+  // グループ設定ありの未アップロード（自動アップロード対象外＝手動申請の対象）
+  const groupedPendingReceipts = allReceipts.filter(r => r.uploadStatus === 'pending' && r.groupName);
+
+  // グループ専用の手動申請（単票は自動アップロードされるため、手動はグループのみ）
+  const handleGroupUpload = useCallback(async () => {
+    const noCompany = groupedPendingReceipts.filter(r => !r.companyId);
+    if (noCompany.length > 0) {
+      alert(`会社未設定のレシートが ${noCompany.length} 枚あります。先に会社を設定してください。`);
+      return;
+    }
+    if (groupedPendingReceipts.length === 0) return;
+    await performUpload(groupedPendingReceipts);
+  }, [groupedPendingReceipts, performUpload]);
 
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
@@ -354,7 +370,9 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
               </div>
               <div className="receipt-card-info">
                 <span className="receipt-date">{formatDate(receipt.createdAt)}</span>
-                <span className="receipt-amount">¥{(receipt.amount ?? 1).toLocaleString()}</span>
+                <span className={`receipt-amount ${receipt.amount === null ? 'no-amount' : ''}`}>
+                  {receipt.amount !== null ? `¥${receipt.amount.toLocaleString()}` : '金額未入力'}
+                </span>
                 <span className="receipt-payment">{receipt.paymentMethodName}</span>
                 {receipt.companyName && <span className="receipt-company">{receipt.companyName}</span>}
               </div>
@@ -418,10 +436,10 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
         </div>
       )}
 
-      {/* 未選択時のアップロードボタン（pendingフィルター時） */}
-      {!selectMode && filter === 'pending' && pendingCount > 0 && (
+      {/* グループ専用の手動申請バー（単票は自動アップロードされるため手動はグループのみ） */}
+      {!selectMode && filter === 'pending' && groupedPendingReceipts.length > 0 && (
         <div className="upload-all-bar">
-          <button className="upload-all-button" onClick={handleUpload} disabled={isUploading}>
+          <button className="upload-all-button" onClick={handleGroupUpload} disabled={isUploading}>
             {isUploading ? (
               <><div className="shutter-spinner small" /> アップロード中...</>
             ) : (
@@ -431,7 +449,7 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
                   <polyline points="17 8 12 3 7 8" />
                   <line x1="12" y1="3" x2="12" y2="15" />
                 </svg>
-                全てアップロード（{pendingCount}枚）
+                グループを申請（{groupedPendingReceipts.length}枚）
               </>
             )}
           </button>

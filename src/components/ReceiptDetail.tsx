@@ -7,6 +7,7 @@ import {
   updateReceiptMemo,
   updateUploadStatus,
   updateReceiptDriveFileId,
+  updateReceiptFreeeIds,
   deleteReceipt,
   updateReceiptsCompany,
   updateReceiptGroup,
@@ -64,7 +65,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
       setCurrentReceipt(data);
       setMemo(data.memo || '');
       setGroupInput(data.groupName || '');
-      setAmountInput(String(data.amount ?? 1));
+      setAmountInput(data.amount !== null ? String(data.amount) : '');
     }
   }, [receipt.id]);
 
@@ -136,7 +137,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   const handleAmountSave = useCallback(async () => {
     if (!receipt.id) return;
     const parsed = parseInt(amountInput, 10);
-    await updateReceiptAmount(receipt.id, Number.isFinite(parsed) ? parsed : 1);
+    await updateReceiptAmount(receipt.id, Number.isFinite(parsed) && parsed > 0 ? parsed : null);
     setIsEditingAmount(false);
     await loadReceiptData();
     onUpdate();
@@ -144,7 +145,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
 
   // 金額編集キャンセル
   const handleAmountCancel = useCallback(() => {
-    setAmountInput(String(currentReceipt?.amount ?? 1));
+    setAmountInput(currentReceipt?.amount != null ? String(currentReceipt.amount) : '');
     setIsEditingAmount(false);
   }, [currentReceipt?.amount]);
 
@@ -167,7 +168,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
         paymentMethodId: fresh.paymentMethodId,
         paymentMethodName: fresh.paymentMethodName,
         groupName: fresh.groupName,
-        amount: fresh.amount ?? 1,
+        amount: fresh.amount,
         memo: fresh.memo,
         capturedAt: fresh.createdAt,
         driveFileId: fresh.driveFileId,
@@ -180,6 +181,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
         await updateReceiptDriveFileId(receipt.id, result.driveFileId);
       }
       if (result?.status === 'completed') {
+        await updateReceiptFreeeIds(receipt.id, result.freeeReceiptId ?? null, result.freeeExpenseId ?? null);
         await updateUploadStatus(receipt.id, 'completed');
       } else {
         await updateUploadStatus(receipt.id, 'error', result?.error || 'アップロードに失敗しました');
@@ -331,7 +333,9 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
               </div>
             ) : (
               <div className="detail-meta-value-container">
-                <span className="detail-meta-value">¥{(currentReceipt.amount ?? 1).toLocaleString()}</span>
+                <span className="detail-meta-value">
+                  {currentReceipt.amount !== null ? `¥${currentReceipt.amount.toLocaleString()}` : '金額未入力'}
+                </span>
                 <svg className="edit-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
               </div>
             )}

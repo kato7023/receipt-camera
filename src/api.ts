@@ -3,7 +3,7 @@
  */
 
 
-import { db, updateUploadStatus, updateReceiptDriveFileId, updateReceiptBackupId, generateId } from './db';
+import { db, updateUploadStatus, updateReceiptDriveFileId, updateReceiptBackupId, updateReceiptFreeeIds, getAutoHoldReason, generateId } from './db';
 import type { Company, PaymentMethod, Receipt } from './db';
 
 // GAS Web App のデプロイ URL（セットアップ時に設定）
@@ -280,7 +280,7 @@ export async function uploadReceipts(
     paymentMethodId: string;
     paymentMethodName: string;
     groupName: string | null;
-    amount: number;
+    amount: number | null;
     memo: string;
     capturedAt: Date;
     driveFileId?: string | null;
@@ -317,7 +317,7 @@ export async function uploadReceipts(
         paymentMethodId: item.paymentMethodId,
         paymentMethodName: item.paymentMethodName,
         groupName: item.groupName,
-        amount: item.amount > 0 ? item.amount : 1,
+        amount: item.amount !== null && item.amount > 0 ? item.amount : 1,
         memo: item.memo,
         capturedAt: item.capturedAt.toISOString(),
         driveFileId: item.driveFileId ?? null,
@@ -393,6 +393,7 @@ export async function reconcilePendingUploads(): Promise<void> {
           await updateReceiptDriveFileId(receipt.id, result.driveFileId);
         }
         if (result.status === 'completed') {
+          await updateReceiptFreeeIds(receipt.id, result.freeeReceiptId ?? null, result.freeeExpenseId ?? null);
           await updateUploadStatus(receipt.id, 'completed');
         } else {
           await updateUploadStatus(receipt.id, 'error', result.error || 'アップロードに失敗しました');
@@ -444,6 +445,86 @@ export async function reconcilePendingUploads(): Promise<void> {
  * freeeへは一切アクセスせず、Drive保存と「撮影記録」シートへの記録のみ行う。
  * 成功したらdriveFileIdをローカルに保存し、実際のアップロード時にDriveへの再保存を避ける。
  */
+/**
+ * 自動アップロード: 保留理由のない未アップロードレシートを1枚ずつ自動で
+ * freeeへ申請する（証憑＋経費申請下書きの同時作成＝現行の一括フローと同じ経路）。
+ * - グループ設定ありは対象外（グループ専用ボタンで手動申請）
+ * - 会社未設定は対象外（設定された時点で次のトリガーで自動処理される）
+ * - 金額未入力は仮1円で申請（Phase 2のOCR補完でPUT修正予定）
+ * @returns 処理した枚数（成功・失敗問わず。0なら対象なし）
+ */
+let autoUploadRunning = false;
+
+export async function autoProcessPendingReceipts(): Promise<number> {
+  if (autoUploadRunning) return 0;
+  autoUploadRunning = true;
+  try {
+    const pending = await db.receipts.where('uploadStatus').equals('pending').toArray();
+    const targets = pending.filter((r) => r.id !== undefined && getAutoHoldReason(r) === null);
+    let processed = 0;
+
+    for (const target of targets) {
+      const id = target.id!;
+      const requestId = generateUploadRequestId();
+      try {
+        await updateUploadStatus(id, 'uploading', null, requestId, 0);
+        // ステータス更新でレコードが作り直されるため、必ず新鮮なオブジェクトを使う
+        const fresh = (await db.receipts.get(id)) ?? target;
+
+        const results = await uploadReceipts([{
+          image: fresh.image,
+          companyId: fresh.companyId!,
+          paymentMethodId: fresh.paymentMethodId,
+          paymentMethodName: fresh.paymentMethodName,
+          groupName: null,
+          amount: fresh.amount,
+          memo: fresh.memo,
+          capturedAt: fresh.createdAt,
+          driveFileId: fresh.driveFileId,
+          backupId: fresh.backupId,
+        }], requestId);
+
+        const result = results[0];
+        if (result?.driveFileId && !fresh.driveFileId) {
+          await updateReceiptDriveFileId(id, result.driveFileId);
+        }
+        if (result?.status === 'completed') {
+          await updateReceiptFreeeIds(id, result.freeeReceiptId ?? null, result.freeeExpenseId ?? null);
+          await updateUploadStatus(id, 'completed');
+        } else {
+          await updateUploadStatus(id, 'error', result?.error || 'アップロードに失敗しました');
+        }
+      } catch (err) {
+        // 自動処理は静かに失敗させ、エラータブとバッジで気付ける状態にする
+        console.error('autoProcessPendingReceipts failed for', id, err);
+        await updateUploadStatus(id, 'error', (err as Error).message).catch(() => {});
+      }
+      processed++;
+    }
+
+    return processed;
+  } finally {
+    autoUploadRunning = false;
+  }
+}
+
+/**
+ * 自動アップロードを遅延実行で予約する（デバウンス）。
+ * 撮影後は連写を待ってまとめて処理するため30秒、入力変更後は5秒程度を想定。
+ * @param onDone 1枚以上処理した場合に呼ばれる（UI更新用）
+ */
+let autoUploadTimer: ReturnType<typeof setTimeout> | undefined;
+
+export function scheduleAutoUpload(onDone: () => void, delayMs = 30000): void {
+  if (autoUploadTimer !== undefined) clearTimeout(autoUploadTimer);
+  autoUploadTimer = setTimeout(() => {
+    autoUploadTimer = undefined;
+    autoProcessPendingReceipts().then((processed) => {
+      if (processed > 0) onDone();
+    });
+  }, delayMs);
+}
+
 // このセッションでバックアップ処理中のreceiptId。並行に同じレシートを
 // 二重送信しないためのガード（backupPendingReceiptsのPromise.allや、
 // 撮影直後発火と起動時再試行が重なるケースで効く）。

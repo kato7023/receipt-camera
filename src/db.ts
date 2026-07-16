@@ -36,8 +36,9 @@ export interface Receipt {
   // グループ化（整理ステップで設定）
   groupName: string | null;
 
-  // 金額（freeeの経費申請作成に必須。未入力の場合は1円で登録）
-  amount: number;
+  // 金額。null = 未入力（自動アップロードでは仮1円で申請を作成し、
+  // Phase 2のOCR金額補完でPUT修正する。freeeの経費申請作成には1以上が必須）
+  amount: number | null;
 
   // アップロード状態
   uploadStatus: 'pending' | 'uploading' | 'completed' | 'error';
@@ -63,7 +64,27 @@ export interface Receipt {
   // iOSのバックグラウンド停止でdriveFileId保存が失われても、Driveが重複しないようにするため。
   backupId: string | null;
 
+  // アップロード完了時に保存するfreee側のID（Phase 2のOCR取得・申請PUT編集に使用）
+  freeeReceiptId: number | null;
+  freeeExpenseId: number | null;
+
+  // AI推測（OCR→過去照合→申請PUT編集）の進行状態（Phase 2で使用）
+  // none=未対象 / pending=OCR結果待ち / done=反映済み / given_up=OCR取得を諦めた
+  enrichState: 'none' | 'pending' | 'done' | 'given_up';
+
   memo: string;
+}
+
+/**
+ * 自動アップロードの保留理由を返す（null = 自動アップロード対象）。
+ * - noCompany: 会社未設定（設定されたら自動キューに入る）
+ * - group: グループ設定あり（全部揃ってからグループ専用ボタンで手動申請）
+ * ※金額未入力は保留しない（仮1円で申請し、Phase 2のOCR補完でPUT修正する方針）
+ */
+export function getAutoHoldReason(receipt: Receipt): 'noCompany' | 'group' | null {
+  if (receipt.groupName) return 'group';
+  if (!receipt.companyId) return 'noCompany';
+  return null;
 }
 
 /**
@@ -149,7 +170,7 @@ export async function saveReceipt(
   companyId: string | null = null,
   companyName: string | null = null,
   groupName: string | null = null,
-  amount: number = 1
+  amount: number | null = null
 ): Promise<number> {
   const thumbnail = await createThumbnail(imageBlob);
   const id = await db.receipts.add({
@@ -161,7 +182,7 @@ export async function saveReceipt(
     companyId,
     companyName,
     groupName,
-    amount: amount > 0 ? amount : 1,
+    amount: amount !== null && amount > 0 ? amount : null,
     uploadStatus: 'pending',
     uploadError: null,
     uploadedAt: null,
@@ -169,6 +190,9 @@ export async function saveReceipt(
     uploadRequestIndex: null,
     driveFileId: null,
     backupId: generateId(),
+    freeeReceiptId: null,
+    freeeExpenseId: null,
+    enrichState: 'none',
     memo: '',
   });
   return id as number;
@@ -301,13 +325,24 @@ export async function updateReceiptMemo(
 }
 
 /**
- * 領収書の金額を更新する（0以下は1円に丸める。freeeの経費申請作成には1以上が必須）
+ * 領収書の金額を更新する（0以下・未入力はnull=未入力扱い）
  */
 export async function updateReceiptAmount(
   id: number,
-  amount: number
+  amount: number | null
 ): Promise<void> {
-  await updateReceiptFields([id], { amount: amount > 0 ? amount : 1 });
+  await updateReceiptFields([id], { amount: amount !== null && amount > 0 ? amount : null });
+}
+
+/**
+ * アップロード完了時にfreee側のIDを保存する（Phase 2のOCR取得・申請PUT編集に使用）
+ */
+export async function updateReceiptFreeeIds(
+  id: number,
+  freeeReceiptId: number | null,
+  freeeExpenseId: number | null
+): Promise<void> {
+  await updateReceiptFields([id], { freeeReceiptId, freeeExpenseId });
 }
 
 /**

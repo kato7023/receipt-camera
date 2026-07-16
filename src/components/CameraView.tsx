@@ -103,7 +103,8 @@ export default function CameraView({ onCapture }: CameraViewProps) {
 
       setIsProcessing(true);
       try {
-        const amount = amountInput ? parseInt(amountInput, 10) : 1;
+        // 金額は未入力ならnull（自動アップロードで仮1円申請→OCR補完の対象になる）
+        const parsedAmount = amountInput ? parseInt(amountInput, 10) : NaN;
         const receiptId = await saveReceipt(
           file,
           selectedPayment.id,
@@ -111,7 +112,7 @@ export default function CameraView({ onCapture }: CameraViewProps) {
           selectedCompany?.id || null,
           selectedCompany?.name || null,
           selectedGroup,
-          Number.isFinite(amount) && amount > 0 ? amount : 1
+          Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount : null
         );
         setCaptureCount((prev) => prev + 1);
         setAmountInput('');

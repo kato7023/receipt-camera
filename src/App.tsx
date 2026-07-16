@@ -3,7 +3,7 @@ import CameraView from './components/CameraView';
 import ReceiptList from './components/ReceiptList';
 import ReceiptDetail from './components/ReceiptDetail';
 import SettingsModal from './components/SettingsModal';
-import { reconcilePendingUploads, backupPendingReceipts, ensureApiKey } from './api';
+import { reconcilePendingUploads, backupPendingReceipts, ensureApiKey, autoProcessPendingReceipts, scheduleAutoUpload } from './api';
 import type { Receipt } from './db';
 
 type TabType = 'camera' | 'list';
@@ -14,9 +14,15 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
 
-  const handleCapture = useCallback(() => {
+  const refresh = useCallback(() => {
     setRefreshKey((prev) => prev + 1);
   }, []);
+
+  // 撮影後は連写が落ち着くのを待ってから（30秒デバウンス）自動アップロードを実行
+  const handleCapture = useCallback(() => {
+    setRefreshKey((prev) => prev + 1);
+    scheduleAutoUpload(refresh, 30000);
+  }, [refresh]);
 
   const handleSelectReceipt = useCallback((receipt: Receipt) => {
     setSelectedReceipt(receipt);
@@ -26,9 +32,12 @@ export default function App() {
     setSelectedReceipt(null);
   }, []);
 
+  // 編集（会社設定・金額入力など）で保留が解除された可能性があるため、
+  // 少し待ってから自動アップロードを実行する
   const handleUpdate = useCallback(() => {
     setRefreshKey((prev) => prev + 1);
-  }, []);
+    scheduleAutoUpload(refresh, 5000);
+  }, [refresh]);
 
   // 起動時にストレージの永続化をOSへ要求する。
   // iOSは空き容量が減るとサイトデータ（合言葉・未アップロード領収書）を予告なく
@@ -47,12 +56,17 @@ export default function App() {
     ensureApiKey();
   }, []);
 
-  // 起動時に「'uploading'のまま止まっているレシート」をGASへ問い合わせて解消する
-  // （通信断発生直後にアプリを閉じてしまった場合の救済）
+  // 起動時に「'uploading'のまま止まっているレシート」をGASへ問い合わせて解消し、
+  // その後、保留理由のない未アップロードレシートを自動アップロードする
   useEffect(() => {
-    reconcilePendingUploads().then(() => {
-      setRefreshKey((prev) => prev + 1);
-    });
+    reconcilePendingUploads()
+      .then(() => {
+        setRefreshKey((prev) => prev + 1);
+        return autoProcessPendingReceipts();
+      })
+      .then((processed) => {
+        if (processed > 0) setRefreshKey((prev) => prev + 1);
+      });
   }, []);
 
   // 起動時に、撮影直後のバックグラウンドバックアップに失敗したままのレシートを再試行する
