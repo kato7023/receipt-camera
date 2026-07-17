@@ -463,11 +463,12 @@ function findSimilarExpenseApplication(freeeCompanyId, partnerName, amount, excl
 /**
  * OCR結果と過去照合をもとに、本アプリが作成した下書き申請をPUTで更新する。
  * - amountProvisional=true（仮1円で作成済み）かつOCR金額あり → 金額を修正
+ * - OCR発行日あり → 経費精算の発行日・申請行の取引日を修正
  * - 経費科目テンプレートの推定が得られた場合 → 明細のテンプレートを差し替え
  * - 備考にOCR情報と推定根拠を追記
  * purchase_linesは「IDを指定しない行は削除される」PUT仕様のため、
  * 必ずGETで現状を取得し、行ID・明細行IDを保持したまま送る。
- * @returns {{updatedAmount:number|null, note:string}}
+ * @returns {{updatedAmount:number|null, updatedIssueDate:string|null, note:string}}
  */
 function enrichExpenseApplication(freeeCompanyId, freeeExpenseId, ocr, similar, amountProvisional) {
   const current = getFromFreeeWithDetail('expense_applications/' + freeeExpenseId, { company_id: freeeCompanyId });
@@ -476,10 +477,14 @@ function enrichExpenseApplication(freeeCompanyId, freeeExpenseId, ocr, similar, 
 
   if (app.status !== 'draft' && app.status !== 'feedback') {
     // 既に申請中・承認済みなら触らない（安全側）
-    return { updatedAmount: null, note: 'status=' + app.status + ' のため更新せず' };
+    return { updatedAmount: null, updatedIssueDate: null, note: 'status=' + app.status + ' のため更新せず' };
   }
 
   const newAmount = (amountProvisional && ocr && ocr.amount !== null && ocr.amount > 0) ? ocr.amount : null;
+  // 現在の撮影UIでは発行日の手入力を受け付けておらず、作成時の発行日は撮影日
+  // （暫定値）なので、形式が正しいOCR発行日があればそちらを優先する。
+  const candidateIssueDate = ocr && ocr.issueDate ? String(ocr.issueDate) : '';
+  const newIssueDate = /^\d{4}-\d{2}-\d{2}$/.test(candidateIssueDate) ? candidateIssueDate : null;
 
   // 行ID・明細行IDを保持しつつ、必要な箇所だけ書き換える
   const purchaseLines = (app.purchase_lines || []).map(function(line) {
@@ -494,7 +499,7 @@ function enrichExpenseApplication(freeeCompanyId, freeeExpenseId, ocr, similar, 
     });
     const result = {
       id: line.id,
-      transaction_date: line.transaction_date,
+      transaction_date: newIssueDate || line.transaction_date,
       expense_application_lines: eaLines,
     };
     if (line.receipt_id) result.receipt_id = line.receipt_id;
@@ -515,7 +520,7 @@ function enrichExpenseApplication(freeeCompanyId, freeeExpenseId, ocr, similar, 
   const payload = {
     company_id: freeeCompanyId,
     title: app.title,
-    issue_date: app.issue_date,
+    issue_date: newIssueDate || app.issue_date,
     description: description,
     purchase_lines: purchaseLines,
   };
@@ -524,7 +529,7 @@ function enrichExpenseApplication(freeeCompanyId, freeeExpenseId, ocr, similar, 
 
   putToFreeeWithDetail('expense_applications/' + freeeExpenseId, payload);
 
-  return { updatedAmount: newAmount, note: enrichNote };
+  return { updatedAmount: newAmount, updatedIssueDate: newIssueDate, note: enrichNote };
 }
 
 /**

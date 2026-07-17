@@ -273,6 +273,7 @@ function enrichReceipt(body) {
     partnerName: ocr.partnerName,
     ocrAmount: ocr.amount,
     updatedAmount: result.updatedAmount,
+    updatedIssueDate: result.updatedIssueDate,
     note: result.note,
   });
 
@@ -282,6 +283,7 @@ function enrichReceipt(body) {
     issueDate: ocr.issueDate,
     ocrAmount: ocr.amount,
     updatedAmount: result.updatedAmount,
+    updatedIssueDate: result.updatedIssueDate,
     note: result.note,
   };
 }
