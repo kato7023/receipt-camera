@@ -346,6 +346,16 @@ export async function updateReceiptFreeeIds(
 }
 
 /**
+ * AI推測（enrich）の進行状態を更新する
+ */
+export async function setEnrichState(
+  id: number,
+  state: Receipt['enrichState']
+): Promise<void> {
+  await updateReceiptFields([id], { enrichState: state });
+}
+
+/**
  * 領収書の支払い方法を更新する
  */
 export async function updateReceiptPaymentMethod(

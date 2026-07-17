@@ -11,28 +11,37 @@
  * 安全なAPIエンドポイントのホワイトリスト
  * ここにないエンドポイントへの POST/PUT/DELETE は拒否される
  * tags は 2026-07-13 ユーザー承認（メモタグ新規作成のみ・破壊的変更なし。AGENTS.md参照）
+ * PUT expense_applications は 2026-07-13 ユーザー承認
+ * （本アプリが作成した下書き申請の更新に限定。マスタデータには一切触れない。AGENTS.md参照）
  */
 var ALLOWED_POST_ENDPOINTS = ['receipts', 'expense_applications', 'tags'];
+var ALLOWED_PUT_ENDPOINT_PREFIXES = ['expense_applications/'];
 
 /**
  * Freee API リクエストの安全性を検証
- * DELETE/PUT は全面禁止、POST はホワイトリストのみ許可
+ * DELETE は全面禁止、POST/PUT はホワイトリストのみ許可
  */
 function validateFreeeRequest(method, endpoint) {
   method = method.toUpperCase();
-  
+
   if (method === 'DELETE') {
     throw new Error('🔴 安全保護: Freee API への DELETE リクエストは禁止されています');
   }
-  
+
   if (method === 'PUT') {
-    throw new Error('🔴 安全保護: Freee API への PUT リクエストは禁止されています');
+    const allowed = ALLOWED_PUT_ENDPOINT_PREFIXES.some(function(prefix) {
+      return endpoint.indexOf(prefix) === 0;
+    });
+    if (!allowed) {
+      throw new Error('🔴 安全保護: エンドポイント "' + endpoint + '" への PUT は許可されていません。許可: ' + ALLOWED_PUT_ENDPOINT_PREFIXES.join(', '));
+    }
+    return true;
   }
-  
+
   if (method === 'POST' && ALLOWED_POST_ENDPOINTS.indexOf(endpoint) === -1) {
     throw new Error('🔴 安全保護: エンドポイント "' + endpoint + '" への POST は許可されていません。許可リスト: ' + ALLOWED_POST_ENDPOINTS.join(', '));
   }
-  
+
   return true;
 }
 
@@ -68,6 +77,64 @@ function postToFreeeWithDetail(endpoint, payload) {
     throw new Error('Freee APIエラー (HTTP ' + status + ', ' + endpoint + '): ' + text + ' | 送信内容: ' + JSON.stringify(payload));
   }
 
+  return text ? JSON.parse(text) : null;
+}
+
+/**
+ * freee APIへのGET（パスパラメータ付きエンドポイント対応版）。
+ * freeeAPIv2ライブラリのRequestクラスはURL末尾にスラッシュを付けるため
+ * `receipts/{id}` のようなパスと相性が悪い。ライブラリのtokenゲッターのみ利用し
+ * （ライブラリ自体は変更しない）、URLを自前で組み立てる。
+ * @param {string} path 例: 'receipts/123', 'expense_applications'
+ * @param {Object} params クエリパラメータ（company_id等）
+ */
+function getFromFreeeWithDetail(path, params) {
+  const token = new FreeeAPI.Request('receipts').token;
+  const query = Object.keys(params || {}).map(function(k) {
+    return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+  }).join('&');
+  const url = 'https://api.freee.co.jp/api/1/' + path + (query ? '?' + query : '');
+
+  const response = UrlFetchApp.fetch(url, {
+    method: 'get',
+    headers: { 'Authorization': 'Bearer ' + token, 'accept': 'application/json' },
+    muteHttpExceptions: true,
+  });
+
+  const status = response.getResponseCode();
+  const text = response.getContentText();
+  if (String(status).match(/2\d\d/) === null) {
+    throw new Error('Freee APIエラー (HTTP ' + status + ', GET ' + path + '): ' + text);
+  }
+  return text ? JSON.parse(text) : null;
+}
+
+/**
+ * freee APIへのPUT。expense_applications/{id}（本アプリ作成の下書き申請の更新）専用。
+ * validateFreeeRequestの許可リスト検査を必ず通る。
+ */
+function putToFreeeWithDetail(path, payload) {
+  validateFreeeRequest('PUT', path);
+
+  const token = new FreeeAPI.Request('receipts').token;
+  const url = 'https://api.freee.co.jp/api/1/' + path;
+
+  const response = UrlFetchApp.fetch(url, {
+    method: 'put',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      'accept': 'application/json',
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+
+  const status = response.getResponseCode();
+  const text = response.getContentText();
+  if (String(status).match(/2\d\d/) === null) {
+    throw new Error('Freee APIエラー (HTTP ' + status + ', PUT ' + path + '): ' + text + ' | 送信内容: ' + JSON.stringify(payload));
+  }
   return text ? JSON.parse(text) : null;
 }
 
@@ -308,6 +375,156 @@ function createExpenseDraft(companyId, receiptId, paymentMethodName, amount, mem
   }
 
   return response.expense_application.id;
+}
+
+/**
+ * 証憑のOCR解析結果（receipt_metadatum）を取得する。
+ * OCRは証憑アップロード後に非同期で実行されるため、未確定の場合はnullを返す。
+ * ※発行元(partner_name)の自動推測は上位プラン限定の可能性があり、
+ *   金額・発行日だけが入るケースも正常系として扱う。
+ * @returns {{partnerName:string, issueDate:string, amount:number|null}|null}
+ */
+function getReceiptMetadata(freeeReceiptId, freeeCompanyId) {
+  const response = getFromFreeeWithDetail('receipts/' + freeeReceiptId, { company_id: freeeCompanyId });
+  const receipt = response && response.receipt;
+  const meta = receipt && receipt.receipt_metadatum;
+  if (!meta) return null;
+
+  const amount = (meta.amount !== undefined && meta.amount !== null) ? Number(meta.amount) : null;
+  const partnerName = meta.partner_name ? String(meta.partner_name) : '';
+  const issueDate = meta.issue_date ? String(meta.issue_date) : '';
+
+  // 全項目が空ならOCR未確定とみなす
+  if (!partnerName && !issueDate && (amount === null || isNaN(amount))) return null;
+
+  return { partnerName: partnerName, issueDate: issueDate, amount: (amount !== null && !isNaN(amount)) ? amount : null };
+}
+
+/**
+ * 過去の経費申請から類似のものを探し、経費科目テンプレートIDを推定する。
+ * 優先順位: ①発行元名がタイトル/備考に含まれる直近の申請 ②金額が一致する直近の申請。
+ * 見つからなければnull（呼び出し側で現行の消耗品費フォールバックを維持）。
+ * @returns {{templateId:number, reason:string}|null}
+ */
+function findSimilarExpenseApplication(freeeCompanyId, partnerName, amount, excludeApplicationId) {
+  try {
+    // 直近の申請100件を取得（新しい順に返る想定。念のためissue_dateで降順ソート）
+    const response = getFromFreeeWithDetail('expense_applications', {
+      company_id: freeeCompanyId,
+      limit: 100,
+    });
+    const apps = ((response && response.expense_applications) || [])
+      .filter(function(a) { return a.id !== excludeApplicationId; })
+      .sort(function(a, b) { return String(b.issue_date) < String(a.issue_date) ? -1 : 1; });
+
+    const extractTemplateId = function(app) {
+      const lines = app.purchase_lines || [];
+      for (let i = 0; i < lines.length; i++) {
+        const eaLines = lines[i].expense_application_lines || [];
+        for (let j = 0; j < eaLines.length; j++) {
+          if (eaLines[j].expense_application_line_template_id) {
+            return eaLines[j].expense_application_line_template_id;
+          }
+        }
+      }
+      return null;
+    };
+
+    // ① 発行元名の一致（タイトルまたは備考に含まれる）
+    if (partnerName) {
+      for (let i = 0; i < apps.length; i++) {
+        const app = apps[i];
+        const haystack = String(app.title || '') + ' ' + String(app.description || '');
+        if (haystack.indexOf(partnerName) !== -1) {
+          const templateId = extractTemplateId(app);
+          if (templateId) return { templateId: templateId, reason: '発行元「' + partnerName + '」が過去申請と一致' };
+        }
+      }
+    }
+
+    // ② 金額の一致
+    if (amount !== null && amount > 0) {
+      for (let i = 0; i < apps.length; i++) {
+        const app = apps[i];
+        if (Number(app.total_amount) === Number(amount)) {
+          const templateId = extractTemplateId(app);
+          if (templateId) return { templateId: templateId, reason: '金額' + amount + '円が過去申請と一致' };
+        }
+      }
+    }
+
+    return null;
+  } catch (e) {
+    Logger.log('⚠️ 過去申請の照合に失敗（推定なしで続行）: ' + e.message);
+    return null;
+  }
+}
+
+/**
+ * OCR結果と過去照合をもとに、本アプリが作成した下書き申請をPUTで更新する。
+ * - amountProvisional=true（仮1円で作成済み）かつOCR金額あり → 金額を修正
+ * - 経費科目テンプレートの推定が得られた場合 → 明細のテンプレートを差し替え
+ * - 備考にOCR情報と推定根拠を追記
+ * purchase_linesは「IDを指定しない行は削除される」PUT仕様のため、
+ * 必ずGETで現状を取得し、行ID・明細行IDを保持したまま送る。
+ * @returns {{updatedAmount:number|null, note:string}}
+ */
+function enrichExpenseApplication(freeeCompanyId, freeeExpenseId, ocr, similar, amountProvisional) {
+  const current = getFromFreeeWithDetail('expense_applications/' + freeeExpenseId, { company_id: freeeCompanyId });
+  const app = current && current.expense_application;
+  if (!app) throw new Error('経費申請の取得に失敗しました: ' + JSON.stringify(current));
+
+  if (app.status !== 'draft' && app.status !== 'feedback') {
+    // 既に申請中・承認済みなら触らない（安全側）
+    return { updatedAmount: null, note: 'status=' + app.status + ' のため更新せず' };
+  }
+
+  const newAmount = (amountProvisional && ocr && ocr.amount !== null && ocr.amount > 0) ? ocr.amount : null;
+
+  // 行ID・明細行IDを保持しつつ、必要な箇所だけ書き換える
+  const purchaseLines = (app.purchase_lines || []).map(function(line) {
+    const eaLines = (line.expense_application_lines || []).map(function(ea) {
+      const updated = { id: ea.id, amount: ea.amount, description: ea.description };
+      if (ea.expense_application_line_template_id) {
+        updated.expense_application_line_template_id = ea.expense_application_line_template_id;
+      }
+      if (newAmount !== null) updated.amount = newAmount;
+      if (similar && similar.templateId) updated.expense_application_line_template_id = similar.templateId;
+      return updated;
+    });
+    const result = {
+      id: line.id,
+      transaction_date: line.transaction_date,
+      expense_application_lines: eaLines,
+    };
+    if (line.receipt_id) result.receipt_id = line.receipt_id;
+    return result;
+  });
+
+  // 備考にOCR情報・推定根拠を追記（既存の備考は保持）
+  const noteParts = [];
+  if (ocr) {
+    if (ocr.partnerName) noteParts.push('発行元: ' + ocr.partnerName);
+    if (ocr.issueDate) noteParts.push('発行日: ' + ocr.issueDate);
+    if (ocr.amount !== null) noteParts.push('OCR金額: ' + ocr.amount + '円');
+  }
+  if (similar) noteParts.push('科目推定: ' + similar.reason);
+  const enrichNote = noteParts.length ? '[自動補完] ' + noteParts.join(' / ') : '';
+  const description = [String(app.description || ''), enrichNote].filter(Boolean).join('\n');
+
+  const payload = {
+    company_id: freeeCompanyId,
+    title: app.title,
+    issue_date: app.issue_date,
+    description: description,
+    purchase_lines: purchaseLines,
+  };
+  if (app.section_id) payload.section_id = app.section_id;
+  if (app.tag_ids && app.tag_ids.length) payload.tag_ids = app.tag_ids;
+
+  putToFreeeWithDetail('expense_applications/' + freeeExpenseId, payload);
+
+  return { updatedAmount: newAmount, note: enrichNote };
 }
 
 /**

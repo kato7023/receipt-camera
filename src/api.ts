@@ -3,7 +3,7 @@
  */
 
 
-import { db, updateUploadStatus, updateReceiptDriveFileId, updateReceiptBackupId, updateReceiptFreeeIds, getAutoHoldReason, generateId } from './db';
+import { db, updateUploadStatus, updateReceiptDriveFileId, updateReceiptBackupId, updateReceiptFreeeIds, updateReceiptAmount, setEnrichState, getAutoHoldReason, generateId } from './db';
 import type { Company, PaymentMethod, Receipt } from './db';
 
 // GAS Web App のデプロイ URL（セットアップ時に設定）
@@ -494,6 +494,10 @@ export async function autoProcessPendingReceipts(): Promise<number> {
         }
         if (result?.status === 'completed') {
           await updateReceiptFreeeIds(id, result.freeeReceiptId ?? null, result.freeeExpenseId ?? null);
+          // 単票の申請はAI推測（OCR→過去照合→PUT補完）の対象にする
+          if (result.freeeReceiptId && result.freeeExpenseId) {
+            await setEnrichState(id, 'pending');
+          }
           await updateUploadStatus(id, 'completed');
         } else {
           await updateUploadStatus(id, 'error', result?.error || 'アップロードに失敗しました');
@@ -513,8 +517,87 @@ export async function autoProcessPendingReceipts(): Promise<number> {
 }
 
 /**
+ * AI推測（enrich）の後処理: アップロード完了済みでenrich待ちのレシートについて、
+ * GASへOCR結果の取得と申請の補完（PUT編集）を依頼する。
+ * OCRが未確定なら'pending'が返り、次のトリガー（起動時等）で再試行される。
+ * アップロードから24時間経ってもOCRが確定しない場合は諦める（given_up）。
+ * @returns 状態が変化した枚数
+ */
+const ENRICH_GIVE_UP_MS = 24 * 60 * 60 * 1000;
+let enrichRunning = false;
+
+export async function enrichPendingReceipts(): Promise<number> {
+  if (enrichRunning) return 0;
+  enrichRunning = true;
+  try {
+    const baseUrl = getBaseUrl();
+    if (!baseUrl) return 0;
+
+    const targets = await db.receipts
+      .filter((r) =>
+        r.uploadStatus === 'completed' &&
+        r.enrichState === 'pending' &&
+        !!r.freeeReceiptId &&
+        !!r.freeeExpenseId
+      )
+      .toArray();
+
+    let changed = 0;
+    for (const r of targets) {
+      const id = r.id!;
+
+      if (r.uploadedAt && Date.now() - new Date(r.uploadedAt).getTime() > ENRICH_GIVE_UP_MS) {
+        await setEnrichState(id, 'given_up');
+        changed++;
+        continue;
+      }
+
+      try {
+        const response = await fetch(baseUrl, {
+          method: 'POST',
+          // text/plain=単純リクエスト（CORSプリフライト回避）。uploadReceiptsのコメント参照
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'enrichReceipt',
+            apiKey: getStoredApiKey(),
+            companyId: r.companyId,
+            freeeReceiptId: r.freeeReceiptId,
+            freeeExpenseId: r.freeeExpenseId,
+            // ローカルの金額が未入力=仮1円で申請済み → OCR金額でPUT修正してよい
+            amountProvisional: r.amount === null,
+          }),
+        });
+        const json: ApiResponse<{ state: string; updatedAmount?: number | null }> = await response.json();
+
+        if (!json.success || !json.data) {
+          clearApiKeyIfInvalid(json.error);
+          console.warn('enrichReceipt failed:', id, json.error);
+          continue;
+        }
+
+        if (json.data.state === 'done') {
+          if (json.data.updatedAmount) {
+            await updateReceiptAmount(id, json.data.updatedAmount);
+          }
+          await setEnrichState(id, 'done');
+          changed++;
+        }
+        // 'pending'は何もしない（次のトリガーで再試行）
+      } catch (err) {
+        // オフライン等。次のトリガーで再試行
+        console.warn('enrichPendingReceipts failed for', id, err);
+      }
+    }
+    return changed;
+  } finally {
+    enrichRunning = false;
+  }
+}
+
+/**
  * 自動アップロードを遅延実行で予約する（デバウンス）。
  * 撮影後は連写を待ってまとめて処理するため30秒、入力変更後は5秒程度を想定。
+ * アップロード後は続けてAI推測（enrich）も試みる。
  * @param onDone 1枚以上処理した場合に呼ばれる（UI更新用）
  */
 let autoUploadTimer: ReturnType<typeof setTimeout> | undefined;
@@ -523,9 +606,14 @@ export function scheduleAutoUpload(onDone: () => void, delayMs = 30000): void {
   if (autoUploadTimer !== undefined) clearTimeout(autoUploadTimer);
   autoUploadTimer = setTimeout(() => {
     autoUploadTimer = undefined;
-    autoProcessPendingReceipts().then((processed) => {
-      if (processed > 0) onDone();
-    });
+    autoProcessPendingReceipts()
+      .then(async (processed) => {
+        const enriched = await enrichPendingReceipts();
+        return processed + enriched;
+      })
+      .then((total) => {
+        if (total > 0) onDone();
+      });
   }, delayMs);
 }
 

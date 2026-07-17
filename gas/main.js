@@ -64,6 +64,11 @@ function doPost(e) {
       return jsonResponse({ success: true, data: result });
     }
 
+    if (body.action === 'enrichReceipt') {
+      const result = enrichReceipt(body);
+      return jsonResponse({ success: true, data: result });
+    }
+
     const requestId = body.requestId || null;
 
     if (body.action !== 'upload') {
@@ -229,6 +234,80 @@ function dedupeCaptureRecords() {
 
   Logger.log('🎉 完了: ' + rowsToDelete.length + '行を削除、' + trashed + '件をゴミ箱へ移動、' +
     keptUsed + '件はfreee使用中のため保持しました。');
+}
+
+/**
+ * AI推測（enrich）: 証憑のOCR結果を取得し、過去申請と照合して
+ * 本アプリが作成した下書き申請をPUTで補完する。
+ * OCR未確定なら state='pending' を返し、クライアントが後で再試行する。
+ * @param {{companyId:string, freeeReceiptId:number, freeeExpenseId:number, amountProvisional:boolean}} body
+ */
+function enrichReceipt(body) {
+  const companies = getCompanies();
+  const company = companies.find(c => c.id === body.companyId);
+  if (!company) {
+    throw new Error('会社ID ' + body.companyId + ' が見つかりません');
+  }
+  const freeeCompanyId = company.freeeCompanyId;
+
+  // 1) OCR結果の取得（未確定ならpending）
+  const ocr = getReceiptMetadata(body.freeeReceiptId, freeeCompanyId);
+  if (!ocr) {
+    return { state: 'pending' };
+  }
+
+  // 2) 過去申請との照合（経費科目の推定）
+  const similar = findSimilarExpenseApplication(freeeCompanyId, ocr.partnerName, ocr.amount, body.freeeExpenseId);
+
+  // 3) 下書き申請をPUTで補完
+  const result = enrichExpenseApplication(
+    freeeCompanyId,
+    body.freeeExpenseId,
+    ocr,
+    similar,
+    body.amountProvisional === true
+  );
+
+  logToSheetSafe_('enrich', {
+    freeeExpenseId: body.freeeExpenseId,
+    partnerName: ocr.partnerName,
+    ocrAmount: ocr.amount,
+    updatedAmount: result.updatedAmount,
+    note: result.note,
+  });
+
+  return {
+    state: 'done',
+    partnerName: ocr.partnerName,
+    issueDate: ocr.issueDate,
+    ocrAmount: ocr.amount,
+    updatedAmount: result.updatedAmount,
+    note: result.note,
+  };
+}
+
+/**
+ * enrichの実行記録をアップロードログに残す（ベストエフォート）
+ */
+function logToSheetSafe_(action, detail) {
+  try {
+    writeLog({
+      timestamp: new Date().toISOString(),
+      action: action,
+      companyName: '',
+      paymentMethod: '',
+      groupName: '',
+      driveFileId: '',
+      freeeReceiptId: '',
+      freeeExpenseId: String(detail.freeeExpenseId || ''),
+      status: 'completed',
+      error: JSON.stringify(detail),
+      requestId: '',
+      receiptIndex: '',
+    });
+  } catch (e) {
+    console.error('logToSheetSafe_ failed:', e && e.message);
+  }
 }
 
 /**

@@ -3,7 +3,7 @@ import CameraView from './components/CameraView';
 import ReceiptList from './components/ReceiptList';
 import ReceiptDetail from './components/ReceiptDetail';
 import SettingsModal from './components/SettingsModal';
-import { reconcilePendingUploads, backupPendingReceipts, ensureApiKey, autoProcessPendingReceipts, scheduleAutoUpload } from './api';
+import { reconcilePendingUploads, backupPendingReceipts, ensureApiKey, autoProcessPendingReceipts, enrichPendingReceipts, scheduleAutoUpload } from './api';
 import type { Receipt } from './db';
 
 type TabType = 'camera' | 'list';
@@ -57,15 +57,17 @@ export default function App() {
   }, []);
 
   // 起動時に「'uploading'のまま止まっているレシート」をGASへ問い合わせて解消し、
-  // その後、保留理由のない未アップロードレシートを自動アップロードする
+  // その後、保留理由のない未アップロードレシートを自動アップロード、
+  // さらにAI推測（OCR→過去照合→申請の自動補完）の待ち分を処理する
   useEffect(() => {
     reconcilePendingUploads()
       .then(() => {
         setRefreshKey((prev) => prev + 1);
         return autoProcessPendingReceipts();
       })
-      .then((processed) => {
-        if (processed > 0) setRefreshKey((prev) => prev + 1);
+      .then(async (processed) => {
+        const enriched = await enrichPendingReceipts();
+        if (processed + enriched > 0) setRefreshKey((prev) => prev + 1);
       });
   }, []);
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, updateReceiptGroup, updateReceiptsCompany, updateUploadStatus, updateReceiptDriveFileId, updateReceiptFreeeIds, deleteReceipts } from '../db';
+import { db, updateReceiptGroup, updateReceiptsCompany, updateUploadStatus, updateReceiptDriveFileId, updateReceiptFreeeIds, setEnrichState, deleteReceipts } from '../db';
 import type { Receipt, Company } from '../db';
 import { getCachedCompanies, uploadReceipts, generateUploadRequestId, scheduleAutoUpload } from '../api';
 import CompanyAssigner from './CompanyAssigner';
@@ -183,6 +183,10 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
           }
           if (result.status === 'completed') {
             await updateReceiptFreeeIds(receipt.id, result.freeeReceiptId ?? null, result.freeeExpenseId ?? null);
+            // 単票の申請はAI推測（OCR→過去照合→PUT補完）の対象にする（グループは対象外）
+            if (!receipt.groupName && result.freeeReceiptId && result.freeeExpenseId) {
+              await setEnrichState(receipt.id, 'pending');
+            }
             await updateUploadStatus(receipt.id, 'completed');
           } else {
             await updateUploadStatus(receipt.id, 'error', result.error || 'アップロードに失敗しました');
@@ -361,6 +365,12 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
                     </span>
                     {!receipt.companyId && receipt.uploadStatus === 'pending' && (
                       <span className="status-badge no-company">会社未設定</span>
+                    )}
+                    {receipt.uploadStatus === 'completed' && receipt.enrichState === 'pending' && (
+                      <span className="status-badge uploading">OCR解析中</span>
+                    )}
+                    {receipt.uploadStatus === 'completed' && receipt.amount === null && receipt.enrichState !== 'pending' && (
+                      <span className="status-badge no-company">金額確認</span>
                     )}
                     {receipt.groupName && (
                       <span className="group-label">{receipt.groupName}</span>

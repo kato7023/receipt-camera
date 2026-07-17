@@ -8,6 +8,7 @@ import {
   updateUploadStatus,
   updateReceiptDriveFileId,
   updateReceiptFreeeIds,
+  setEnrichState,
   deleteReceipt,
   updateReceiptsCompany,
   updateReceiptGroup,
@@ -182,6 +183,10 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
       }
       if (result?.status === 'completed') {
         await updateReceiptFreeeIds(receipt.id, result.freeeReceiptId ?? null, result.freeeExpenseId ?? null);
+        // 単票の申請はAI推測（OCR→過去照合→PUT補完）の対象にする（グループは対象外）
+        if (!fresh.groupName && result.freeeReceiptId && result.freeeExpenseId) {
+          await setEnrichState(receipt.id, 'pending');
+        }
         await updateUploadStatus(receipt.id, 'completed');
       } else {
         await updateUploadStatus(receipt.id, 'error', result?.error || 'アップロードに失敗しました');
