@@ -334,7 +334,11 @@ export async function uploadReceipts(
   try {
     response = await fetch(baseUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // text/plainは「単純リクエスト」なのでCORSプリフライトが発生しない。
+      // GAS WebアプリはOPTIONS(プリフライト)に405を返すため、application/jsonだと
+      // 環境によってPOSTが「Failed to fetch」になる（実測で確認済み）。
+      // GAS側はe.postData.contentsを読むだけなのでContent-Typeに依存しない。
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'upload', apiKey: getStoredApiKey(), requestId, receipts }),
     });
   } catch (err) {
@@ -552,7 +556,8 @@ export async function backupReceiptInBackground(receiptId: number): Promise<void
     const imageBase64 = await blobToBase64(receipt.image);
     const response = await fetch(baseUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // text/plain=単純リクエスト（CORSプリフライト回避）。uploadReceiptsのコメント参照
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         action: 'backupReceipt',
         apiKey: getStoredApiKey(),
