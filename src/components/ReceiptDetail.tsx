@@ -8,14 +8,13 @@ import {
   updateUploadStatus,
   updateReceiptDriveFileId,
   updateReceiptFreeeIds,
-  setEnrichState,
   deleteReceipt,
   updateReceiptsCompany,
   updateReceiptGroup,
   updateReceiptPaymentMethod,
   updateReceiptAmount
 } from '../db';
-import { getCachedCompanies, getCachedPaymentMethods, uploadReceipts, generateUploadRequestId } from '../api';
+import { getCachedCompanies, getCachedPaymentMethods, uploadReceipts, generateUploadRequestId, updateExpenseDraftAmount } from '../api';
 import CompanyAssigner from './CompanyAssigner';
 
 interface ReceiptDetailProps {
@@ -42,6 +41,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   const [isEditingGroup, setIsEditingGroup] = useState(false);
   const [groupInput, setGroupInput] = useState('');
   const [isEditingAmount, setIsEditingAmount] = useState(false);
+  const [isSavingAmount, setIsSavingAmount] = useState(false);
   const [amountInput, setAmountInput] = useState('');
 
   const groupInputRef = useRef<HTMLInputElement>(null);
@@ -138,11 +138,27 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   const handleAmountSave = useCallback(async () => {
     if (!receipt.id) return;
     const parsed = parseInt(amountInput, 10);
-    await updateReceiptAmount(receipt.id, Number.isFinite(parsed) && parsed > 0 ? parsed : null);
-    setIsEditingAmount(false);
-    await loadReceiptData();
-    onUpdate();
-  }, [receipt.id, amountInput, loadReceiptData, onUpdate]);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      alert('金額は1円以上で入力してください。');
+      return;
+    }
+
+    setIsSavingAmount(true);
+    try {
+      const target = currentReceipt;
+      if (target?.uploadStatus === 'completed' && target.companyId && target.freeeExpenseId) {
+        await updateExpenseDraftAmount(target.companyId, target.freeeExpenseId, parsed);
+      }
+      await updateReceiptAmount(receipt.id, parsed);
+      setIsEditingAmount(false);
+      await loadReceiptData();
+      onUpdate();
+    } catch (err) {
+      alert(`金額の保存に失敗しました。\n\n${(err as Error).message}`);
+    } finally {
+      setIsSavingAmount(false);
+    }
+  }, [receipt.id, amountInput, currentReceipt, loadReceiptData, onUpdate]);
 
   // 金額編集キャンセル
   const handleAmountCancel = useCallback(() => {
@@ -183,10 +199,6 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
       }
       if (result?.status === 'completed') {
         await updateReceiptFreeeIds(receipt.id, result.freeeReceiptId ?? null, result.freeeExpenseId ?? null);
-        // 単票の申請はAI推測（OCR→過去照合→PUT補完）の対象にする（グループは対象外）
-        if (!fresh.groupName && result.freeeReceiptId && result.freeeExpenseId) {
-          await setEnrichState(receipt.id, 'pending');
-        }
         await updateUploadStatus(receipt.id, 'completed');
       } else {
         await updateUploadStatus(receipt.id, 'error', result?.error || 'アップロードに失敗しました');
@@ -220,9 +232,9 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case 'pending': return '未アップロード';
+      case 'pending': return '未UP';
       case 'uploading': return 'アップロード中...';
-      case 'completed': return 'アップロード完了';
+      case 'completed': return currentReceipt?.amount === null ? '未入力' : '完了';
       case 'error': return 'エラー';
       default: return status;
     }
@@ -333,7 +345,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
                     if (e.key === 'Escape') handleAmountCancel();
                   }}
                 />
-                <button className="group-save-btn" onClick={handleAmountSave}>✓</button>
+                <button className="group-save-btn" onClick={handleAmountSave} disabled={isSavingAmount}>{isSavingAmount ? '…' : '✓'}</button>
                 <button className="group-cancel-btn" onClick={handleAmountCancel}>×</button>
               </div>
             ) : (

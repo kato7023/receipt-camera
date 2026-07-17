@@ -317,7 +317,8 @@ export async function uploadReceipts(
         paymentMethodId: item.paymentMethodId,
         paymentMethodName: item.paymentMethodName,
         groupName: item.groupName,
-        amount: item.amount !== null && item.amount > 0 ? item.amount : 1,
+        // 下書きは金額0で作成し、ユーザー確認後にupdateExpenseDraftAmountで確定する。
+        amount: item.amount !== null && item.amount > 0 ? item.amount : 0,
         memo: item.memo,
         capturedAt: item.capturedAt.toISOString(),
         driveFileId: item.driveFileId ?? null,
@@ -494,10 +495,6 @@ export async function autoProcessPendingReceipts(): Promise<number> {
         }
         if (result?.status === 'completed') {
           await updateReceiptFreeeIds(id, result.freeeReceiptId ?? null, result.freeeExpenseId ?? null);
-          // 単票の申請はAI推測（OCR→過去照合→PUT補完）の対象にする
-          if (result.freeeReceiptId && result.freeeExpenseId) {
-            await setEnrichState(id, 'pending');
-          }
           await updateUploadStatus(id, 'completed');
         } else {
           await updateUploadStatus(id, 'error', result?.error || 'アップロードに失敗しました');
@@ -595,9 +592,38 @@ export async function enrichPendingReceipts(): Promise<number> {
 }
 
 /**
+ * ユーザーが確認した金額を、既存のfreee経費精算下書きへ反映する。
+ * freee側の更新が成功してから、呼び出し元がIndexedDBの金額を確定する。
+ */
+export async function updateExpenseDraftAmount(
+  companyId: string,
+  freeeExpenseId: number,
+  amount: number,
+): Promise<void> {
+  const baseUrl = getBaseUrl();
+  if (!baseUrl) throw new Error('GAS Web App URL が未設定です。');
+  const response = await fetch(baseUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action: 'updateExpenseAmount',
+      apiKey: getStoredApiKey(),
+      companyId,
+      freeeExpenseId,
+      amount,
+    }),
+  });
+  const json: ApiResponse<{ amount: number }> = await response.json();
+  if (!json.success || !json.data) {
+    clearApiKeyIfInvalid(json.error);
+    throw new Error(json.error || '経費精算下書きの金額更新に失敗しました');
+  }
+}
+
+/**
  * 自動アップロードを遅延実行で予約する（デバウンス）。
  * 撮影後は連写を待ってまとめて処理するため30秒、入力変更後は5秒程度を想定。
- * アップロード後は続けてAI推測（enrich）も試みる。
+ * アップロード後は下書き作成結果を画面へ反映する。
  * @param onDone 1枚以上処理した場合に呼ばれる（UI更新用）
  */
 let autoUploadTimer: ReturnType<typeof setTimeout> | undefined;
@@ -607,12 +633,8 @@ export function scheduleAutoUpload(onDone: () => void, delayMs = 30000): void {
   autoUploadTimer = setTimeout(() => {
     autoUploadTimer = undefined;
     autoProcessPendingReceipts()
-      .then(async (processed) => {
-        const enriched = await enrichPendingReceipts();
-        return processed + enriched;
-      })
-      .then((total) => {
-        if (total > 0) onDone();
+      .then((processed) => {
+        if (processed > 0) onDone();
       });
   }, delayMs);
 }

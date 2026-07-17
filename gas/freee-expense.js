@@ -339,19 +339,17 @@ function applySectionAndTags(payload, companyId, paymentMethodName, capturedAt) 
  * @param {number} companyId Freee の事業所 ID
  * @param {number} receiptId Freee の証憑 ID
  * @param {string} paymentMethodName 支払い方法名
- * @param {number} amount 金額（freeeのバリデーション上、1以上が必須）
+ * @param {number} amount 金額（下書きでは0以上。未確認時は0）
  * @param {string} memo メモ
  * @param {string} capturedAt 撮影日時 (ISO 8601)
  * @returns {number} 経費精算ID
  */
 function createExpenseDraft(companyId, receiptId, paymentMethodName, amount, memo, capturedAt) {
   const transactionDate = capturedAt.substring(0, 10);
-  const templateId = getDefaultExpenseApplicationLineTemplateId(companyId);
   const expenseLine = {
-    amount: amount > 0 ? amount : 1,
+    amount: amount > 0 ? amount : 0,
     description: memo || '領収書 (' + paymentMethodName + ')',
   };
-  if (templateId) expenseLine.expense_application_line_template_id = templateId;
 
   const payload = {
     company_id: companyId,
@@ -536,7 +534,7 @@ function enrichExpenseApplication(freeeCompanyId, freeeExpenseId, ocr, similar, 
  * 経費精算の下書きを作成（グループ = N枚 → N明細を1経費精算に）
  * @param {number} companyId Freee の事業所 ID
  * @param {number[]} receiptIds Freee の証憑 ID の配列
- * @param {number[]} amounts 金額の配列（receiptIdsと同じ順序・同じ長さ）
+ * @param {number[]} amounts 金額の配列（未確認時は0）
  * @param {string} paymentMethodName 支払い方法名
  * @param {string} groupName グループ名
  * @param {string} capturedAt 撮影日時 (ISO 8601)
@@ -544,14 +542,12 @@ function enrichExpenseApplication(freeeCompanyId, freeeExpenseId, ocr, similar, 
  */
 function createGroupExpenseDraft(companyId, receiptIds, amounts, paymentMethodName, groupName, capturedAt) {
   const transactionDate = capturedAt.substring(0, 10);
-  const templateId = getDefaultExpenseApplicationLineTemplateId(companyId);
   const purchaseLines = receiptIds.map(function(receiptId, index) {
     const amount = amounts[index];
     const expenseLine = {
-      amount: amount > 0 ? amount : 1,
+      amount: amount > 0 ? amount : 0,
       description: groupName + ' (' + (index + 1) + '/' + receiptIds.length + ')',
     };
-    if (templateId) expenseLine.expense_application_line_template_id = templateId;
     return {
       transaction_date: transactionDate,
       receipt_id: receiptId,
@@ -575,4 +571,55 @@ function createGroupExpenseDraft(companyId, receiptIds, amounts, paymentMethodNa
   }
 
   return response.expense_application.id;
+}
+
+/**
+ * ユーザーが確認した金額で、本アプリ作成の下書き経費精算を更新する。
+ * GETで現在の明細IDを取得してからPUTするため、既存の証憑紐付けを保持する。
+ * @param {number} freeeCompanyId
+ * @param {number} freeeExpenseId
+ * @param {number} amount
+ * @returns {{amount:number}}
+ */
+function updateExpenseApplicationAmount(freeeCompanyId, freeeExpenseId, amount) {
+  const current = getFromFreeeWithDetail('expense_applications/' + freeeExpenseId, { company_id: freeeCompanyId });
+  const app = current && current.expense_application;
+  if (!app) throw new Error('経費申請の取得に失敗しました: ' + JSON.stringify(current));
+  if (app.status !== 'draft' && app.status !== 'feedback') {
+    throw new Error('status=' + app.status + ' の経費精算は更新できません');
+  }
+
+  const purchaseLines = (app.purchase_lines || []).map(function(line) {
+    const expenseLines = (line.expense_application_lines || []).map(function(ea) {
+      const updated = {
+        id: ea.id,
+        amount: amount,
+        description: ea.description,
+      };
+      if (ea.expense_application_line_template_id) {
+        updated.expense_application_line_template_id = ea.expense_application_line_template_id;
+      }
+      return updated;
+    });
+    const result = {
+      id: line.id,
+      transaction_date: line.transaction_date,
+      expense_application_lines: expenseLines,
+    };
+    if (line.receipt_id) result.receipt_id = line.receipt_id;
+    return result;
+  });
+
+  const payload = {
+    company_id: freeeCompanyId,
+    title: app.title,
+    issue_date: app.issue_date,
+    description: app.description,
+    purchase_lines: purchaseLines,
+  };
+  if (app.section_id) payload.section_id = app.section_id;
+  if (app.tag_ids && app.tag_ids.length) payload.tag_ids = app.tag_ids;
+
+  putToFreeeWithDetail('expense_applications/' + freeeExpenseId, payload);
+  return { amount: amount };
 }

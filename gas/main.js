@@ -68,6 +68,10 @@ function doPost(e) {
       const result = enrichReceipt(body);
       return jsonResponse({ success: true, data: result });
     }
+    if (body.action === 'updateExpenseAmount') {
+      const result = updateExpenseAmount(body);
+      return jsonResponse({ success: true, data: result });
+    }
 
     const requestId = body.requestId || null;
 
@@ -286,6 +290,34 @@ function enrichReceipt(body) {
     updatedIssueDate: result.updatedIssueDate,
     note: result.note,
   };
+}
+
+/**
+ * ユーザー確認済み金額で、既存の経費精算下書きを更新する。
+ * OCRや過去申請照合は行わず、金額だけを反映する。
+ */
+function updateExpenseAmount(body) {
+  const companies = getCompanies();
+  const company = companies.find(c => c.id === body.companyId);
+  if (!company) {
+    throw new Error('会社ID ' + body.companyId + ' が見つかりません');
+  }
+  const amount = Number(body.amount);
+  if (!Number.isInteger(amount) || amount <= 0) {
+    throw new Error('金額は1円以上の整数で指定してください');
+  }
+
+  const result = updateExpenseApplicationAmount(
+    company.freeeCompanyId,
+    Number(body.freeeExpenseId),
+    amount
+  );
+
+  logToSheetSafe_('updateExpenseAmount', {
+    freeeExpenseId: body.freeeExpenseId,
+    amount: amount,
+  });
+  return result;
 }
 
 /**

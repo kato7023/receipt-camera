@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, updateReceiptGroup, updateReceiptsCompany, updateUploadStatus, updateReceiptDriveFileId, updateReceiptFreeeIds, setEnrichState, deleteReceipts } from '../db';
+import { db, updateReceiptGroup, updateReceiptsCompany, updateUploadStatus, updateReceiptDriveFileId, updateReceiptFreeeIds, deleteReceipts } from '../db';
 import type { Receipt, Company } from '../db';
 import { getCachedCompanies, uploadReceipts, generateUploadRequestId, scheduleAutoUpload } from '../api';
 import CompanyAssigner from './CompanyAssigner';
@@ -10,12 +10,19 @@ interface ReceiptListProps {
   refreshKey: number;
 }
 
-type FilterType = 'pending' | 'completed' | 'error' | 'all';
+type FilterType = 'unuploaded' | 'unconfirmed' | 'completed' | 'error' | 'all';
+
+function getReceiptCategory(receipt: Receipt): Exclude<FilterType, 'all'> {
+  if (receipt.uploadStatus === 'error') return 'error';
+  if (!receipt.companyId || receipt.uploadStatus !== 'completed') return 'unuploaded';
+  if (receipt.amount === null) return 'unconfirmed';
+  return 'completed';
+}
 
 export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [allReceipts, setAllReceipts] = useState<Receipt[]>([]);
-  const [filter, setFilter] = useState<FilterType>('pending');
+  const [filter, setFilter] = useState<FilterType>('unuploaded');
   const [thumbnailUrls, setThumbnailUrls] = useState<Map<number, string>>(new Map());
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -35,8 +42,11 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
 
     let filtered: Receipt[];
     switch (filter) {
-      case 'pending':
-        filtered = all.filter((r) => r.uploadStatus === 'pending');
+      case 'unuploaded':
+        filtered = all.filter((r) => getReceiptCategory(r) === 'unuploaded');
+        break;
+      case 'unconfirmed':
+        filtered = all.filter((r) => getReceiptCategory(r) === 'unconfirmed');
         break;
       case 'completed':
         filtered = all.filter((r) => r.uploadStatus === 'completed');
@@ -183,10 +193,6 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
           }
           if (result.status === 'completed') {
             await updateReceiptFreeeIds(receipt.id, result.freeeReceiptId ?? null, result.freeeExpenseId ?? null);
-            // 単票の申請はAI推測（OCR→過去照合→PUT補完）の対象にする（グループは対象外）
-            if (!receipt.groupName && result.freeeReceiptId && result.freeeExpenseId) {
-              await setEnrichState(receipt.id, 'pending');
-            }
             await updateUploadStatus(receipt.id, 'completed');
           } else {
             await updateUploadStatus(receipt.id, 'error', result.error || 'アップロードに失敗しました');
@@ -250,8 +256,9 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
     return `${month}/${day} ${hours}:${minutes}`;
   };
 
-  const pendingCount = allReceipts.filter(r => r.uploadStatus === 'pending').length;
-  const completedCount = allReceipts.filter(r => r.uploadStatus === 'completed').length;
+  const unuploadedCount = allReceipts.filter(r => getReceiptCategory(r) === 'unuploaded').length;
+  const unconfirmedCount = allReceipts.filter(r => getReceiptCategory(r) === 'unconfirmed').length;
+  const completedCount = allReceipts.filter(r => getReceiptCategory(r) === 'completed').length;
   const errorCount = allReceipts.filter(r => r.uploadStatus === 'error').length;
   // グループ設定ありの未アップロード（自動アップロード対象外＝手動申請の対象）
   const groupedPendingReceipts = allReceipts.filter(r => r.uploadStatus === 'pending' && r.groupName);
@@ -267,23 +274,23 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
     await performUpload(groupedPendingReceipts);
   }, [groupedPendingReceipts, performUpload]);
 
-  const getStatusBadgeClass = (status: string) => {
-    switch (status) {
-      case 'pending': return 'status-badge pending';
-      case 'uploading': return 'status-badge uploading';
+  const getStatusBadgeClass = (receipt: Receipt) => {
+    switch (getReceiptCategory(receipt)) {
+      case 'unuploaded': return receipt.uploadStatus === 'uploading' ? 'status-badge uploading' : 'status-badge pending';
+      case 'unconfirmed': return 'status-badge pending';
       case 'completed': return 'status-badge completed';
       case 'error': return 'status-badge error';
       default: return 'status-badge';
     }
   };
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'pending': return '未アップロード';
-      case 'uploading': return 'アップロード中';
+  const getStatusLabel = (receipt: Receipt) => {
+    switch (getReceiptCategory(receipt)) {
+      case 'unuploaded': return receipt.uploadStatus === 'uploading' ? 'アップロード中' : '未UP';
+      case 'unconfirmed': return '未入力';
       case 'completed': return '完了';
       case 'error': return 'エラー';
-      default: return status;
+      default: return '';
     }
   };
 
@@ -312,8 +319,11 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
 
       {/* フィルター */}
       <div className="filter-tabs">
-        <button className={`filter-tab ${filter === 'pending' ? 'active' : ''}`} onClick={() => setFilter('pending')}>
-          未アップロード<span className="filter-count pending">{pendingCount}</span>
+        <button className={`filter-tab ${filter === 'unuploaded' ? 'active' : ''}`} onClick={() => setFilter('unuploaded')}>
+          未UP<span className="filter-count pending">{unuploadedCount}</span>
+        </button>
+        <button className={`filter-tab ${filter === 'unconfirmed' ? 'active' : ''}`} onClick={() => setFilter('unconfirmed')}>
+          未入力<span className="filter-count pending">{unconfirmedCount}</span>
         </button>
         <button className={`filter-tab ${filter === 'completed' ? 'active' : ''}`} onClick={() => setFilter('completed')}>
           完了<span className="filter-count completed">{completedCount}</span>
@@ -337,7 +347,8 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
             </svg>
           </div>
           <p className="empty-text">
-            {filter === 'pending' ? '未アップロードのレシートはありません'
+            {filter === 'unuploaded' ? '未UPのレシートはありません'
+              : filter === 'unconfirmed' ? '金額未入力のレシートはありません'
               : filter === 'completed' ? 'アップロード済のレシートはありません'
               : filter === 'error' ? 'エラーのレシートはありません'
               : 'レシートがまだありません'}
@@ -360,16 +371,13 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
                   </span>
                 ) : (
                   <div className="card-badges">
-                    <span className={getStatusBadgeClass(receipt.uploadStatus)}>
-                      {getStatusLabel(receipt.uploadStatus)}
+                    <span className={getStatusBadgeClass(receipt)}>
+                      {getStatusLabel(receipt)}
                     </span>
                     {!receipt.companyId && receipt.uploadStatus === 'pending' && (
                       <span className="status-badge no-company">会社未設定</span>
                     )}
-                    {receipt.uploadStatus === 'completed' && receipt.enrichState === 'pending' && (
-                      <span className="status-badge uploading">OCR解析中</span>
-                    )}
-                    {receipt.uploadStatus === 'completed' && receipt.amount === null && receipt.enrichState !== 'pending' && (
+                    {getReceiptCategory(receipt) === 'unconfirmed' && (
                       <span className="status-badge no-company">金額確認</span>
                     )}
                     {receipt.groupName && (
@@ -447,7 +455,7 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
       )}
 
       {/* グループ専用の手動申請バー（単票は自動アップロードされるため手動はグループのみ） */}
-      {!selectMode && filter === 'pending' && groupedPendingReceipts.length > 0 && (
+      {!selectMode && filter === 'unuploaded' && groupedPendingReceipts.length > 0 && (
         <div className="upload-all-bar">
           <button className="upload-all-button" onClick={handleGroupUpload} disabled={isUploading}>
             {isUploading ? (
