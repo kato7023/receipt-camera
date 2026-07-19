@@ -38,6 +38,7 @@ interface UploadReceiptItem {
   paymentMethodName: string;
   groupName: string | null;
   amount: number;
+  expenseDate?: string;
   memo: string;
   capturedAt: string;
   // 撮影直後のバックグラウンドバックアップで既にDriveへ保存済みならそのファイルID。
@@ -281,6 +282,7 @@ export async function uploadReceipts(
     paymentMethodName: string;
     groupName: string | null;
     amount: number | null;
+    expenseDate?: string;
     memo: string;
     capturedAt: Date;
     driveFileId?: string | null;
@@ -319,6 +321,7 @@ export async function uploadReceipts(
         groupName: item.groupName,
         // 下書きは金額0で作成し、ユーザー確認後にupdateExpenseDraftAmountで確定する。
         amount: item.amount !== null && item.amount > 0 ? item.amount : 0,
+        expenseDate: item.expenseDate,
         memo: item.memo,
         capturedAt: item.capturedAt.toISOString(),
         driveFileId: item.driveFileId ?? null,
@@ -483,6 +486,7 @@ export async function autoProcessPendingReceipts(): Promise<number> {
           paymentMethodName: fresh.paymentMethodName,
           groupName: null,
           amount: fresh.amount,
+          expenseDate: fresh.expenseDate,
           memo: fresh.memo,
           capturedAt: fresh.createdAt,
           driveFileId: fresh.driveFileId,
@@ -620,6 +624,34 @@ export async function updateExpenseDraftAmount(
   }
 }
 
+/** ユーザーが確認した日付を既存のfreee経費精算下書きへ反映する */
+export async function updateExpenseDraftDate(
+  companyId: string,
+  freeeExpenseId: number,
+  freeeReceiptId: number,
+  expenseDate: string,
+): Promise<void> {
+  const baseUrl = getBaseUrl();
+  if (!baseUrl) throw new Error('GAS Web App URL が未設定です。');
+  const response = await fetch(baseUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action: 'updateExpenseDate',
+      apiKey: getStoredApiKey(),
+      companyId,
+      freeeExpenseId,
+      freeeReceiptId,
+      expenseDate,
+    }),
+  });
+  const json: ApiResponse<{ expenseDate: string }> = await response.json();
+  if (!json.success || !json.data) {
+    clearApiKeyIfInvalid(json.error);
+    throw new Error(json.error || '経費精算下書きの日付更新に失敗しました');
+  }
+}
+
 /**
  * 自動アップロードを遅延実行で予約する（デバウンス）。
  * 撮影後は連写を待ってまとめて処理するため30秒、入力変更後は5秒程度を想定。
@@ -679,6 +711,7 @@ export async function backupReceiptInBackground(receiptId: number): Promise<void
         paymentMethodName: receipt.paymentMethodName,
         groupName: receipt.groupName,
         amount: receipt.amount,
+        expenseDate: receipt.expenseDate,
         memo: receipt.memo,
         capturedAt: receipt.createdAt.toISOString(),
       }),

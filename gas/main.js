@@ -72,6 +72,10 @@ function doPost(e) {
       const result = updateExpenseAmount(body);
       return jsonResponse({ success: true, data: result });
     }
+    if (body.action === 'updateExpenseDate') {
+      const result = updateExpenseDate(body);
+      return jsonResponse({ success: true, data: result });
+    }
 
     const requestId = body.requestId || null;
 
@@ -320,6 +324,30 @@ function updateExpenseAmount(body) {
   return result;
 }
 
+/** ユーザー確認済み日付で既存の経費精算下書きを更新する */
+function updateExpenseDate(body) {
+  const companies = getCompanies();
+  const company = companies.find(c => c.id === body.companyId);
+  if (!company) throw new Error('会社ID ' + body.companyId + ' が見つかりません');
+  const expenseDate = String(body.expenseDate || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expenseDate)) {
+    throw new Error('日付はYYYY-MM-DD形式で指定してください');
+  }
+
+  const result = updateExpenseApplicationDate(
+    company.freeeCompanyId,
+    Number(body.freeeExpenseId),
+    Number(body.freeeReceiptId),
+    expenseDate
+  );
+  logToSheetSafe_('updateExpenseDate', {
+    freeeExpenseId: body.freeeExpenseId,
+    freeeReceiptId: body.freeeReceiptId,
+    expenseDate: expenseDate,
+  });
+  return result;
+}
+
 /**
  * enrichの実行記録をアップロードログに残す（ベストエフォート）
  */
@@ -484,7 +512,8 @@ function processSingleReceipt(index, item, companies, requestId) {
       item.paymentMethodName,
       item.amount,
       item.memo,
-      item.capturedAt
+      item.capturedAt,
+      item.expenseDate
     );
 
     // ログ記録
@@ -566,13 +595,15 @@ function processGroupReceipts(indices, items, companies, requestId) {
 
     // Step 3: グループ経費精算下書き作成（N明細を1経費精算に）
     const amounts = items.map(function(item) { return item.amount; });
+    const expenseDates = items.map(function(item) { return item.expenseDate || item.capturedAt.substring(0, 10); });
     const freeeExpenseId = createGroupExpenseDraft(
       company.freeeCompanyId,
       freeeReceiptIds,
       amounts,
       firstItem.paymentMethodName,
       firstItem.groupName || 'グループ',
-      firstItem.capturedAt
+      firstItem.capturedAt,
+      expenseDates
     );
 
     // ログ記録（グループ内のレシートごとに1行。freeeExpenseIdは全行共通のため

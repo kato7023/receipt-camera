@@ -12,9 +12,10 @@ import {
   updateReceiptsCompany,
   updateReceiptGroup,
   updateReceiptPaymentMethod,
-  updateReceiptAmount
+  updateReceiptAmount,
+  updateReceiptExpenseDate
 } from '../db';
-import { getCachedCompanies, getCachedPaymentMethods, uploadReceipts, generateUploadRequestId, updateExpenseDraftAmount } from '../api';
+import { getCachedCompanies, getCachedPaymentMethods, uploadReceipts, generateUploadRequestId, updateExpenseDraftAmount, updateExpenseDraftDate } from '../api';
 import CompanyAssigner from './CompanyAssigner';
 
 interface ReceiptDetailProps {
@@ -42,6 +43,9 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   const [groupInput, setGroupInput] = useState('');
   const [isEditingAmount, setIsEditingAmount] = useState(false);
   const [isSavingAmount, setIsSavingAmount] = useState(false);
+  const [isEditingDate, setIsEditingDate] = useState(false);
+  const [isSavingDate, setIsSavingDate] = useState(false);
+  const [dateInput, setDateInput] = useState('');
   const [amountInput, setAmountInput] = useState('');
 
   const groupInputRef = useRef<HTMLInputElement>(null);
@@ -67,6 +71,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
       setMemo(data.memo || '');
       setGroupInput(data.groupName || '');
       setAmountInput(data.amount !== null ? String(data.amount) : '');
+      setDateInput(data.expenseDate || new Date(data.createdAt).toISOString().slice(0, 10));
     }
   }, [receipt.id]);
 
@@ -160,6 +165,29 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
     }
   }, [receipt.id, amountInput, currentReceipt, loadReceiptData, onUpdate]);
 
+  // 日付保存。アップロード済みの下書きはfreee側を先に更新し、成功後にローカルへ保存する。
+  const handleDateSave = useCallback(async () => {
+    if (!receipt.id || !/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+      alert('日付をYYYY-MM-DD形式で入力してください。');
+      return;
+    }
+    setIsSavingDate(true);
+    try {
+      const target = currentReceipt;
+      if (target?.uploadStatus === 'completed' && target.companyId && target.freeeExpenseId && target.freeeReceiptId) {
+        await updateExpenseDraftDate(target.companyId, target.freeeExpenseId, target.freeeReceiptId, dateInput);
+      }
+      await updateReceiptExpenseDate(receipt.id, dateInput);
+      setIsEditingDate(false);
+      await loadReceiptData();
+      onUpdate();
+    } catch (err) {
+      alert(`日付の保存に失敗しました。\n\n${(err as Error).message}`);
+    } finally {
+      setIsSavingDate(false);
+    }
+  }, [receipt.id, dateInput, currentReceipt, loadReceiptData, onUpdate]);
+
   // 金額編集キャンセル
   const handleAmountCancel = useCallback(() => {
     setAmountInput(currentReceipt?.amount != null ? String(currentReceipt.amount) : '');
@@ -188,6 +216,7 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
         amount: fresh.amount,
         memo: fresh.memo,
         capturedAt: fresh.createdAt,
+        expenseDate: fresh.expenseDate,
         driveFileId: fresh.driveFileId,
         backupId: fresh.backupId,
       }], requestId);
@@ -322,6 +351,28 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
                 ) : (
                   <span className="detail-meta-value unassigned">グループ未設定</span>
                 )}
+                <svg className="edit-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
+              </div>
+            )}
+          </div>
+
+          {/* 経費精算日 */}
+          <div className="detail-meta-item editable" onClick={() => !isEditingDate && setIsEditingDate(true)}>
+            <span className="detail-meta-label">経費精算日</span>
+            {isEditingDate ? (
+              <div className="detail-meta-input-container" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="date"
+                  className="detail-group-input"
+                  value={dateInput}
+                  onChange={(e) => setDateInput(e.target.value)}
+                />
+                <button className="group-save-btn" onClick={handleDateSave} disabled={isSavingDate}>{isSavingDate ? '…' : '✓'}</button>
+                <button className="group-cancel-btn" onClick={() => { setDateInput(currentReceipt.expenseDate || new Date(currentReceipt.createdAt).toISOString().slice(0, 10)); setIsEditingDate(false); }}>×</button>
+              </div>
+            ) : (
+              <div className="detail-meta-value-container">
+                <span className="detail-meta-value">{dateInput}</span>
                 <svg className="edit-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
               </div>
             )}

@@ -174,6 +174,7 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
           paymentMethodName: r.paymentMethodName,
           groupName: r.groupName,
           amount: r.amount,
+          expenseDate: r.expenseDate,
           memo: r.memo,
           capturedAt: r.createdAt,
           driveFileId: r.driveFileId,

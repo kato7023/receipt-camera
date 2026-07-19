@@ -24,6 +24,8 @@ export interface Receipt {
   image: Blob;
   thumbnail: Blob;
   createdAt: Date;
+  // 経費精算に使用する日付。既存レコードは未設定ならcreatedAtへフォールバック。
+  expenseDate?: string;
 
   // 支払い方法（撮影時に設定）
   paymentMethodId: string;
@@ -177,6 +179,7 @@ export async function saveReceipt(
     image: imageBlob,
     thumbnail,
     createdAt: new Date(),
+    expenseDate: new Date().toISOString().slice(0, 10),
     paymentMethodId,
     paymentMethodName,
     companyId,
@@ -332,6 +335,14 @@ export async function updateReceiptAmount(
   amount: number | null
 ): Promise<void> {
   await updateReceiptFields([id], { amount: amount !== null && amount > 0 ? amount : null });
+}
+
+/** 経費精算に使用する日付を更新する */
+export async function updateReceiptExpenseDate(id: number, expenseDate: string): Promise<void> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expenseDate)) {
+    throw new Error('日付はYYYY-MM-DD形式で指定してください');
+  }
+  await updateReceiptFields([id], { expenseDate });
 }
 
 /**

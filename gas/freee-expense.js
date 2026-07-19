@@ -344,8 +344,8 @@ function applySectionAndTags(payload, companyId, paymentMethodName, capturedAt) 
  * @param {string} capturedAt 撮影日時 (ISO 8601)
  * @returns {number} 経費精算ID
  */
-function createExpenseDraft(companyId, receiptId, paymentMethodName, amount, memo, capturedAt) {
-  const transactionDate = capturedAt.substring(0, 10);
+function createExpenseDraft(companyId, receiptId, paymentMethodName, amount, memo, capturedAt, expenseDate) {
+  const transactionDate = expenseDate || capturedAt.substring(0, 10);
   const expenseLine = {
     amount: amount > 0 ? amount : 0,
     description: memo || '領収書 (' + paymentMethodName + ')',
@@ -540,8 +540,8 @@ function enrichExpenseApplication(freeeCompanyId, freeeExpenseId, ocr, similar, 
  * @param {string} capturedAt 撮影日時 (ISO 8601)
  * @returns {number} 経費精算ID
  */
-function createGroupExpenseDraft(companyId, receiptIds, amounts, paymentMethodName, groupName, capturedAt) {
-  const transactionDate = capturedAt.substring(0, 10);
+function createGroupExpenseDraft(companyId, receiptIds, amounts, paymentMethodName, groupName, capturedAt, expenseDates) {
+  const transactionDate = (expenseDates && expenseDates[0]) || capturedAt.substring(0, 10);
   const purchaseLines = receiptIds.map(function(receiptId, index) {
     const amount = amounts[index];
     const expenseLine = {
@@ -549,7 +549,7 @@ function createGroupExpenseDraft(companyId, receiptIds, amounts, paymentMethodNa
       description: groupName + ' (' + (index + 1) + '/' + receiptIds.length + ')',
     };
     return {
-      transaction_date: transactionDate,
+      transaction_date: (expenseDates && expenseDates[index]) || transactionDate,
       receipt_id: receiptId,
       expense_application_lines: [expenseLine],
     };
@@ -622,4 +622,50 @@ function updateExpenseApplicationAmount(freeeCompanyId, freeeExpenseId, amount) 
 
   putToFreeeWithDetail('expense_applications/' + freeeExpenseId, payload);
   return { amount: amount };
+}
+
+/**
+ * 指定した証憑に対応する申請行の日付を更新する。
+ * 単票では申請全体のissue_dateも更新し、グループでは該当行だけを更新する。
+ */
+function updateExpenseApplicationDate(freeeCompanyId, freeeExpenseId, freeeReceiptId, expenseDate) {
+  const current = getFromFreeeWithDetail('expense_applications/' + freeeExpenseId, { company_id: freeeCompanyId });
+  const app = current && current.expense_application;
+  if (!app) throw new Error('経費申請の取得に失敗しました: ' + JSON.stringify(current));
+  if (app.status !== 'draft' && app.status !== 'feedback') {
+    throw new Error('status=' + app.status + ' の経費精算は更新できません');
+  }
+
+  let matched = false;
+  const purchaseLines = (app.purchase_lines || []).map(function(line) {
+    const isTarget = Number(line.receipt_id) === Number(freeeReceiptId);
+    if (isTarget) matched = true;
+    return {
+      id: line.id,
+      transaction_date: isTarget ? expenseDate : line.transaction_date,
+      expense_application_lines: (line.expense_application_lines || []).map(function(ea) {
+        const updated = { id: ea.id, amount: ea.amount, description: ea.description };
+        if (ea.expense_application_line_template_id) {
+          updated.expense_application_line_template_id = ea.expense_application_line_template_id;
+        }
+        return updated;
+      }),
+      ...(line.receipt_id ? { receipt_id: line.receipt_id } : {}),
+    };
+  });
+
+  if (!matched) throw new Error('経費精算内に証憑ID ' + freeeReceiptId + ' の申請行が見つかりません');
+
+  const payload = {
+    company_id: freeeCompanyId,
+    title: app.title,
+    issue_date: app.purchase_lines && app.purchase_lines.length === 1 ? expenseDate : app.issue_date,
+    description: app.description,
+    purchase_lines: purchaseLines,
+  };
+  if (app.section_id) payload.section_id = app.section_id;
+  if (app.tag_ids && app.tag_ids.length) payload.tag_ids = app.tag_ids;
+
+  putToFreeeWithDetail('expense_applications/' + freeeExpenseId, payload);
+  return { expenseDate: expenseDate };
 }
