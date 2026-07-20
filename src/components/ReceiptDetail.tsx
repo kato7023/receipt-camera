@@ -27,6 +27,9 @@ interface ReceiptDetailProps {
 export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDetailProps) {
   const [currentReceipt, setCurrentReceipt] = useState<Receipt | null>(null);
   const [imageUrl, setImageUrl] = useState<string>('');
+  const [showImageViewer, setShowImageViewer] = useState(false);
+  const [imageZoom, setImageZoom] = useState(1);
+  const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
   const [memo, setMemo] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
@@ -50,6 +53,63 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
 
   const groupInputRef = useRef<HTMLInputElement>(null);
   const amountInputRef = useRef<HTMLInputElement>(null);
+  const viewerPointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchDistanceRef = useRef<number | null>(null);
+  const panStartRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+
+  const resetImageView = useCallback(() => {
+    setImageZoom(1);
+    setImagePan({ x: 0, y: 0 });
+  }, []);
+
+  const closeImageViewer = useCallback(() => {
+    setShowImageViewer(false);
+    resetImageView();
+  }, [resetImageView]);
+
+  const changeImageZoom = useCallback((delta: number) => {
+    setImageZoom((current) => Math.min(4, Math.max(1, Number((current + delta).toFixed(2)))));
+    if (imageZoom + delta <= 1) setImagePan({ x: 0, y: 0 });
+  }, [imageZoom]);
+
+  const handleViewerPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    viewerPointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (viewerPointersRef.current.size === 2) {
+      const points = Array.from(viewerPointersRef.current.values());
+      pinchDistanceRef.current = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+      panStartRef.current = null;
+    } else if (imageZoom > 1) {
+      panStartRef.current = { x: event.clientX, y: event.clientY, panX: imagePan.x, panY: imagePan.y };
+    }
+  };
+
+  const handleViewerPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!viewerPointersRef.current.has(event.pointerId)) return;
+    viewerPointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const points = Array.from(viewerPointersRef.current.values());
+    if (points.length === 2 && pinchDistanceRef.current) {
+      const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+      setImageZoom((current) => Math.min(4, Math.max(1, current * (distance / pinchDistanceRef.current!))));
+      pinchDistanceRef.current = distance;
+    } else if (panStartRef.current && imageZoom > 1) {
+      setImagePan({
+        x: panStartRef.current.panX + event.clientX - panStartRef.current.x,
+        y: panStartRef.current.panY + event.clientY - panStartRef.current.y,
+      });
+    }
+  };
+
+  const handleViewerPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    viewerPointersRef.current.delete(event.pointerId);
+    if (viewerPointersRef.current.size < 2) pinchDistanceRef.current = null;
+    if (viewerPointersRef.current.size === 0) panStartRef.current = null;
+  };
+
+  const handleViewerWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    changeImageZoom(event.deltaY < 0 ? 0.25 : -0.25);
+  };
 
   // 画像URLは開いた時点の receipt.image から一度だけ生成する
   // （メタ情報の編集のたびに IndexedDB から Blob を読み直すと、iOS Safari で
@@ -412,7 +472,12 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
 
         {/* 画像 */}
         <div className="detail-image-container">
-          {imageUrl && <img src={imageUrl} alt="領収書" className="detail-image" />}
+          {imageUrl && (
+            <button className="detail-image-button" onClick={() => setShowImageViewer(true)} aria-label="領収書画像を拡大">
+              <img src={imageUrl} alt="領収書（タップで拡大）" className="detail-image" />
+              <span className="detail-image-hint">タップして拡大</span>
+            </button>
+          )}
         </div>
 
         {/* メモ */}
@@ -507,6 +572,35 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
                   )}
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 画像ズームビューア */}
+      {showImageViewer && imageUrl && (
+        <div className="image-viewer-overlay" onClick={closeImageViewer}>
+          <div
+            className="image-viewer-stage"
+            onClick={(e) => e.stopPropagation()}
+            onWheel={handleViewerWheel}
+            onPointerDown={handleViewerPointerDown}
+            onPointerMove={handleViewerPointerMove}
+            onPointerUp={handleViewerPointerUp}
+            onPointerCancel={handleViewerPointerUp}
+          >
+            <img
+              src={imageUrl}
+              alt="領収書（拡大表示）"
+              className="image-viewer-image"
+              style={{ transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${imageZoom})` }}
+            />
+            <button className="image-viewer-close" onClick={closeImageViewer} aria-label="画像ビューアを閉じる">×</button>
+            <div className="image-viewer-controls" onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => changeImageZoom(-0.25)} disabled={imageZoom <= 1} aria-label="縮小">−</button>
+              <span>{Math.round(imageZoom * 100)}%</span>
+              <button onClick={() => changeImageZoom(0.25)} disabled={imageZoom >= 4} aria-label="拡大">＋</button>
+              <button className="image-viewer-reset" onClick={resetImageView}>リセット</button>
             </div>
           </div>
         </div>
