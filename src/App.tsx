@@ -3,7 +3,7 @@ import CameraView from './components/CameraView';
 import ReceiptList from './components/ReceiptList';
 import ReceiptDetail from './components/ReceiptDetail';
 import SettingsModal from './components/SettingsModal';
-import { reconcilePendingUploads, backupPendingReceipts, ensureApiKey, autoProcessPendingReceipts, scheduleAutoUpload } from './api';
+import { reconcilePendingUploads, backupPendingReceipts, ensureApiKey, autoProcessPendingReceipts, scheduleAutoUpload, syncOcrUpdates } from './api';
 import type { Receipt } from './db';
 
 type TabType = 'camera' | 'list';
@@ -66,7 +66,12 @@ export default function App() {
       })
       .then((processed) => {
         if (processed > 0) setRefreshKey((prev) => prev + 1);
-      });
+        return syncOcrUpdates();
+      })
+      .then((changed) => {
+        if (changed > 0) setRefreshKey((prev) => prev + 1);
+      })
+      .catch((error) => console.warn('OCR同期に失敗しました:', error));
   }, []);
 
   // 起動時に、撮影直後のバックグラウンドバックアップに失敗したままのレシートを再試行する

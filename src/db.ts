@@ -74,6 +74,14 @@ export interface Receipt {
   // none=未対象 / pending=OCR結果待ち / done=反映済み / given_up=OCR取得を諦めた
   enrichState: 'none' | 'pending' | 'done' | 'given_up';
 
+  // freee証憑OCRの検索用キャッシュ。ユーザー入力のメモとは分離して保持する。
+  ocrPartnerName?: string;
+  ocrRegistrationNumber?: string;
+  ocrAmount?: number | null;
+  ocrIssueDate?: string;
+  ocrFetchedAt?: Date | null;
+  ocrState?: 'none' | 'pending' | 'done' | 'error';
+
   memo: string;
 }
 
@@ -116,7 +124,10 @@ class ReceiptDB extends Dexie {
   constructor() {
     super('ReceiptCameraProDB');
     this.version(1).stores({
-      receipts: '++id, createdAt, uploadStatus, companyId, groupName',
+      receipts: '++id, createdAt, uploadStatus, companyId, groupName, freeeReceiptId',
+    });
+    this.version(2).stores({
+      receipts: '++id, createdAt, uploadStatus, companyId, groupName, freeeReceiptId',
     });
   }
 }
@@ -196,6 +207,12 @@ export async function saveReceipt(
     freeeReceiptId: null,
     freeeExpenseId: null,
     enrichState: 'none',
+    ocrPartnerName: '',
+    ocrRegistrationNumber: '',
+    ocrAmount: null,
+    ocrIssueDate: '',
+    ocrFetchedAt: null,
+    ocrState: 'none',
     memo: '',
   });
   return id as number;
@@ -353,7 +370,12 @@ export async function updateReceiptFreeeIds(
   freeeReceiptId: number | null,
   freeeExpenseId: number | null
 ): Promise<void> {
-  await updateReceiptFields([id], { freeeReceiptId, freeeExpenseId });
+  await updateReceiptFields([id], {
+    freeeReceiptId,
+    freeeExpenseId,
+    enrichState: freeeReceiptId ? 'pending' : 'none',
+    ocrState: freeeReceiptId ? 'pending' : 'none',
+  });
 }
 
 /**
@@ -364,6 +386,28 @@ export async function setEnrichState(
   state: Receipt['enrichState']
 ): Promise<void> {
   await updateReceiptFields([id], { enrichState: state });
+}
+
+/** freee OCR結果を検索用キャッシュへ反映する */
+export async function updateReceiptOcr(
+  id: number,
+  ocr: {
+    partnerName?: string;
+    registrationNumber?: string;
+    amount?: number | null;
+    issueDate?: string;
+    fetchedAt?: string | Date | null;
+    state?: Receipt['ocrState'];
+  }
+): Promise<void> {
+  await updateReceiptFields([id], {
+    ocrPartnerName: ocr.partnerName || '',
+    ocrRegistrationNumber: ocr.registrationNumber || '',
+    ocrAmount: ocr.amount ?? null,
+    ocrIssueDate: ocr.issueDate || '',
+    ocrFetchedAt: ocr.fetchedAt ? new Date(ocr.fetchedAt) : new Date(),
+    ocrState: ocr.state || 'done',
+  });
 }
 
 /**

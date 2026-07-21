@@ -380,7 +380,7 @@ function createExpenseDraft(companyId, receiptId, paymentMethodName, amount, mem
  * OCRは証憑アップロード後に非同期で実行されるため、未確定の場合はnullを返す。
  * ※発行元(partner_name)の自動推測は上位プラン限定の可能性があり、
  *   金額・発行日だけが入るケースも正常系として扱う。
- * @returns {{partnerName:string, issueDate:string, amount:number|null}|null}
+ * @returns {{partnerName:string, registrationNumber:string, issueDate:string, amount:number|null}|null}
  */
 function getReceiptMetadata(freeeReceiptId, freeeCompanyId) {
   const response = getFromFreeeWithDetail('receipts/' + freeeReceiptId, { company_id: freeeCompanyId });
@@ -390,12 +390,16 @@ function getReceiptMetadata(freeeReceiptId, freeeCompanyId) {
 
   const amount = (meta.amount !== undefined && meta.amount !== null) ? Number(meta.amount) : null;
   const partnerName = meta.partner_name ? String(meta.partner_name) : '';
+  // freeeのレスポンス／契約差異に備え、候補名を吸収する。実レスポンスに存在しない場合は空欄。
+  const registrationNumber = String(
+    meta.registration_number || meta.invoice_registration_number || meta.registration_no || ''
+  );
   const issueDate = meta.issue_date ? String(meta.issue_date) : '';
 
   // 全項目が空ならOCR未確定とみなす
-  if (!partnerName && !issueDate && (amount === null || isNaN(amount))) return null;
+  if (!partnerName && !registrationNumber && !issueDate && (amount === null || isNaN(amount))) return null;
 
-  return { partnerName: partnerName, issueDate: issueDate, amount: (amount !== null && !isNaN(amount)) ? amount : null };
+  return { partnerName: partnerName, registrationNumber: registrationNumber, issueDate: issueDate, amount: (amount !== null && !isNaN(amount)) ? amount : null };
 }
 
 /**

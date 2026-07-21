@@ -286,3 +286,63 @@ function findLoggedResultsByRequestId(requestId) {
 
   return results;
 }
+
+/**
+ * OCR同期用の最新状態シートを作成・取得する。
+ * アップロードログは履歴として残し、OCRシートは証憑ID単位の最新値だけを保持する。
+ */
+function getOcrSheet_() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sheet = ss.getSheetByName('領収書OCR');
+  const headers = [
+    'Freee事業所ID', 'Freee Receipt ID', 'Freee Expense ID', '支払先会社名',
+    'T番号', 'OCR金額', 'OCR発行日', 'OCR状態', '最終取得日時', 'エラー'
+  ];
+  if (!sheet) {
+    sheet = ss.insertSheet('領収書OCR');
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+      .setFontWeight('bold').setBackground('#4a86c8').setFontColor('white');
+  } else if (sheet.getLastColumn() < headers.length) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+  return sheet;
+}
+
+function upsertOcrRecord_(record) {
+  const sheet = getOcrSheet_();
+  const lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    const keys = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+    for (let i = 0; i < keys.length; i++) {
+      if (String(keys[i][0]) === String(record.freeeCompanyId) && String(keys[i][1]) === String(record.freeeReceiptId)) {
+        sheet.getRange(i + 2, 1, 1, 10).setValues([[record.freeeCompanyId, record.freeeReceiptId, record.freeeExpenseId || '', record.partnerName || '', record.registrationNumber || '', record.amount ?? '', record.issueDate || '', record.state, record.fetchedAt, record.error || '']]);
+        return;
+      }
+    }
+  }
+  sheet.appendRow([record.freeeCompanyId, record.freeeReceiptId, record.freeeExpenseId || '', record.partnerName || '', record.registrationNumber || '', record.amount ?? '', record.issueDate || '', record.state, record.fetchedAt, record.error || '']);
+}
+
+/** アプリが差分取得するためのOCR状態一覧 */
+function getOcrUpdates(since) {
+  const sheet = getOcrSheet_();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  const sinceMs = since ? new Date(since).getTime() : 0;
+  return sheet.getRange(2, 1, lastRow - 1, 10).getValues().filter(function(row) {
+    return !sinceMs || new Date(row[8]).getTime() > sinceMs;
+  }).map(function(row) {
+    return {
+      freeeCompanyId: Number(row[0]),
+      freeeReceiptId: Number(row[1]),
+      freeeExpenseId: row[2] ? Number(row[2]) : null,
+      partnerName: String(row[3] || ''),
+      registrationNumber: String(row[4] || ''),
+      amount: row[5] === '' ? null : Number(row[5]),
+      issueDate: String(row[6] || ''),
+      state: String(row[7] || 'done'),
+      fetchedAt: row[8] instanceof Date ? row[8].toISOString() : String(row[8] || ''),
+      error: String(row[9] || ''),
+    };
+  });
+}

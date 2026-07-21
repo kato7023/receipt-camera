@@ -941,6 +941,37 @@ body {
   font-size: 0.75rem;
 }
 
+.advanced-filter-panel select[multiple] {
+  min-height: 76px;
+}
+
+.filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+}
+
+.amount-range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.amount-range-inputs input {
+  min-width: 0;
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 0.75rem;
+}
+
 .select-mode-button {
   padding: var(--space-xs) var(--space-md);
   background: var(--bg-surface);

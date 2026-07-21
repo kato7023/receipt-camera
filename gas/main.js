@@ -35,6 +35,9 @@ function doGet(e) {
       case 'uploadStatus':
         data = getUploadStatus(e.parameter.requestId, Number(e.parameter.expectedCount) || 0);
         break;
+      case 'ocrUpdates':
+        data = getOcrUpdates(e.parameter.since || '');
+        break;
       default:
         return jsonResponse({ success: false, error: `不明なアクション: ${action}` });
     }
@@ -294,6 +297,66 @@ function enrichReceipt(body) {
     updatedIssueDate: result.updatedIssueDate,
     note: result.note,
   };
+}
+
+/**
+ * アップロードログにある証憑を対象に、freeeのOCR結果を一日一回同期する。
+ * GASエディタで初回のみ setupOcrTrigger を実行する。
+ */
+function syncFreeeReceiptOcr() {
+  const companies = getCompanies();
+  const companyByName = {};
+  companies.forEach(function(company) { companyByName[company.name] = company; });
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const logSheet = ss.getSheetByName('アップロードログ');
+  if (!logSheet || logSheet.getLastRow() < 2) return { processed: 0 };
+
+  const ocrSheet = getOcrSheet_();
+  const known = {};
+  if (ocrSheet.getLastRow() >= 2) {
+    ocrSheet.getRange(2, 1, ocrSheet.getLastRow() - 1, 8).getValues().forEach(function(row) {
+      known[String(row[0]) + ':' + String(row[1])] = String(row[7] || '');
+    });
+  }
+
+  const rows = logSheet.getRange(2, 1, logSheet.getLastRow() - 1, Math.max(logSheet.getLastColumn(), 12)).getValues();
+  const targets = {};
+  rows.forEach(function(row) {
+    if (String(row[8]) !== 'completed' || !row[6]) return;
+    const company = companyByName[String(row[2])];
+    if (!company) return;
+    const key = String(company.freeeCompanyId) + ':' + String(row[6]);
+    if (!targets[key]) targets[key] = { company: company, receiptId: Number(row[6]), expenseId: row[7] ? Number(row[7]) : null };
+  });
+
+  let processed = 0;
+  Object.keys(targets).forEach(function(key) {
+    if (known[key] === 'done') return;
+    const target = targets[key];
+    const fetchedAt = new Date();
+    try {
+      const ocr = getReceiptMetadata(target.receiptId, target.company.freeeCompanyId);
+      if (!ocr) {
+        upsertOcrRecord_({ freeeCompanyId: target.company.freeeCompanyId, freeeReceiptId: target.receiptId, freeeExpenseId: target.expenseId, state: 'pending', fetchedAt: fetchedAt, error: 'OCR結果がまだ確定していません' });
+      } else {
+        upsertOcrRecord_({ freeeCompanyId: target.company.freeeCompanyId, freeeReceiptId: target.receiptId, freeeExpenseId: target.expenseId, partnerName: ocr.partnerName, registrationNumber: ocr.registrationNumber, amount: ocr.amount, issueDate: ocr.issueDate, state: 'done', fetchedAt: fetchedAt, error: '' });
+      }
+      processed++;
+    } catch (error) {
+      upsertOcrRecord_({ freeeCompanyId: target.company.freeeCompanyId, freeeReceiptId: target.receiptId, freeeExpenseId: target.expenseId, state: 'error', fetchedAt: fetchedAt, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  return { processed: processed };
+}
+
+/** 毎日午前3時台にOCR同期を実行するトリガーを一度だけ登録する */
+function setupOcrTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === 'syncFreeeReceiptOcr') ScriptApp.deleteTrigger(trigger);
+  });
+  ScriptApp.newTrigger('syncFreeeReceiptOcr').timeBased().everyDays(1).atHour(3).create();
+  Logger.log('領収書OCRの1日1回トリガーを登録しました');
 }
 
 /**
@@ -777,6 +840,10 @@ function setupMasterSheets() {
   } else {
     Logger.log('ℹ️ 撮影記録シートは既に存在します');
   }
+
+  // --- OCR同期 ---
+  getOcrSheet_();
+  Logger.log('✅ 領収書OCRシートを確認しました');
 
   // デフォルトの「シート1」を削除
   const defaultSheet = ss.getSheetByName('シート1');

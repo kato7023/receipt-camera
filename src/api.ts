@@ -3,7 +3,7 @@
  */
 
 
-import { db, updateUploadStatus, updateReceiptDriveFileId, updateReceiptBackupId, updateReceiptFreeeIds, updateReceiptAmount, setEnrichState, getAutoHoldReason, generateId } from './db';
+import { db, updateUploadStatus, updateReceiptDriveFileId, updateReceiptBackupId, updateReceiptFreeeIds, updateReceiptAmount, updateReceiptOcr, setEnrichState, getAutoHoldReason, generateId } from './db';
 import type { Company, PaymentMethod, Receipt } from './db';
 
 // GAS Web App のデプロイ URL（セットアップ時に設定）
@@ -28,6 +28,16 @@ interface UploadStatusResult {
   requestId: string;
   state: 'unknown' | 'processing' | 'done';
   results: UploadResult[] | null;
+}
+
+interface OcrUpdate {
+  freeeReceiptId: number;
+  partnerName: string;
+  registrationNumber: string;
+  amount: number | null;
+  issueDate: string;
+  state: 'none' | 'pending' | 'done' | 'error';
+  fetchedAt: string;
 }
 
 interface UploadReceiptItem {
@@ -154,6 +164,32 @@ export async function fetchPaymentMethods(forceRefresh = false): Promise<Payment
   }
 
   return json.data;
+}
+
+/** GASの「領収書OCR」シートから差分を取得し、ローカル検索キャッシュへ反映する */
+export async function syncOcrUpdates(): Promise<number> {
+  const baseUrl = getBaseUrl();
+  if (!baseUrl) return 0;
+  const since = localStorage.getItem('ocrSyncFetchedAt') || '';
+  const response = await fetch(`${baseUrl}?action=ocrUpdates&since=${encodeURIComponent(since)}&apiKey=${encodeURIComponent(getStoredApiKey())}`);
+  const json: ApiResponse<OcrUpdate[]> = await response.json();
+  if (!json.success || !json.data) {
+    clearApiKeyIfInvalid(json.error);
+    throw new Error(json.error || 'OCR情報の取得に失敗しました');
+  }
+
+  let newest = since;
+  let changed = 0;
+  for (const update of json.data) {
+    const target = await db.receipts.where('freeeReceiptId').equals(update.freeeReceiptId).first();
+    if (!target?.id) continue;
+    await updateReceiptOcr(target.id, update);
+    if (update.state === 'done') await setEnrichState(target.id, 'done');
+    if (update.fetchedAt && (!newest || new Date(update.fetchedAt).getTime() > new Date(newest).getTime())) newest = update.fetchedAt;
+    changed++;
+  }
+  if (newest) localStorage.setItem('ocrSyncFetchedAt', newest);
+  return changed;
 }
 
 /**

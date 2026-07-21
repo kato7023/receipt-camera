@@ -11,8 +11,6 @@ interface ReceiptListProps {
 }
 
 type FilterType = 'unuploaded' | 'unconfirmed' | 'completed' | 'error' | 'all';
-type GroupFilterType = 'all' | 'with' | 'without';
-type AmountFilterType = 'all' | 'entered' | 'empty';
 
 function normalizeSearch(value: string): string {
   return value.trim().toLocaleLowerCase().replace(/[\s　]/g, '');
@@ -31,10 +29,12 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
   const [filter, setFilter] = useState<FilterType>('unuploaded');
   const [searchText, setSearchText] = useState('');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [companyFilter, setCompanyFilter] = useState('');
-  const [paymentFilter, setPaymentFilter] = useState('');
-  const [groupFilter, setGroupFilter] = useState<GroupFilterType>('all');
-  const [amountFilter, setAmountFilter] = useState<AmountFilterType>('all');
+  const [companyFilter, setCompanyFilter] = useState<string[]>([]);
+  const [paymentFilter, setPaymentFilter] = useState<string[]>([]);
+  const [groupFilter, setGroupFilter] = useState<string[]>([]);
+  const [includeUngrouped, setIncludeUngrouped] = useState(false);
+  const [amountMin, setAmountMin] = useState('');
+  const [amountMax, setAmountMax] = useState('');
   const [thumbnailUrls, setThumbnailUrls] = useState<Map<number, string>>(new Map());
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -79,18 +79,25 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
           r.groupName || '',
           r.memo || '',
           r.amount !== null ? String(r.amount) : '',
+          r.ocrPartnerName || '',
+          r.ocrRegistrationNumber || '',
+          r.ocrAmount !== null && r.ocrAmount !== undefined ? String(r.ocrAmount) : '',
+          r.ocrIssueDate || '',
           r.expenseDate || '',
           formatDate(r.createdAt),
         ].join(' '));
         return searchable.includes(search);
       });
     }
-    if (companyFilter) filtered = filtered.filter((r) => r.companyId === companyFilter);
-    if (paymentFilter) filtered = filtered.filter((r) => r.paymentMethodName === paymentFilter);
-    if (groupFilter === 'with') filtered = filtered.filter((r) => !!r.groupName);
-    if (groupFilter === 'without') filtered = filtered.filter((r) => !r.groupName);
-    if (amountFilter === 'entered') filtered = filtered.filter((r) => r.amount !== null);
-    if (amountFilter === 'empty') filtered = filtered.filter((r) => r.amount === null);
+    if (companyFilter.length) filtered = filtered.filter((r) => r.companyId !== null && companyFilter.includes(r.companyId));
+    if (paymentFilter.length) filtered = filtered.filter((r) => paymentFilter.includes(r.paymentMethodName));
+    if (groupFilter.length || includeUngrouped) {
+      filtered = filtered.filter((r) => (r.groupName ? groupFilter.includes(r.groupName) : includeUngrouped));
+    }
+    const min = amountMin === '' ? null : Number(amountMin);
+    const max = amountMax === '' ? null : Number(amountMax);
+    if (min !== null && Number.isFinite(min)) filtered = filtered.filter((r) => r.amount !== null && r.amount >= min);
+    if (max !== null && Number.isFinite(max)) filtered = filtered.filter((r) => r.amount !== null && r.amount <= max);
     setReceipts(filtered);
 
     setThumbnailUrls((prev) => {
@@ -114,13 +121,13 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
       prevCopy.forEach((url) => URL.revokeObjectURL(url));
       return nextUrls;
     });
-  }, [filter, searchText, companyFilter, paymentFilter, groupFilter, amountFilter]);
+  }, [filter, searchText, companyFilter, paymentFilter, groupFilter, includeUngrouped, amountMin, amountMax]);
 
   useEffect(() => { loadReceipts(); }, [loadReceipts, refreshKey]);
   useEffect(() => {
     setSelectedIds(new Set());
     setShowDeleteConfirm(false);
-  }, [filter, searchText, companyFilter, paymentFilter, groupFilter, amountFilter]);
+  }, [filter, searchText, companyFilter, paymentFilter, groupFilter, includeUngrouped, amountMin, amountMax]);
   useEffect(() => {
     return () => { thumbnailUrls.forEach((url) => URL.revokeObjectURL(url)); };
   }, []);
@@ -334,12 +341,14 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
   };
 
   const paymentNames = Array.from(new Set(allReceipts.map((r) => r.paymentMethodName).filter(Boolean))).sort();
-  const hasAdvancedFilter = !!companyFilter || !!paymentFilter || groupFilter !== 'all' || amountFilter !== 'all';
+  const hasAdvancedFilter = companyFilter.length > 0 || paymentFilter.length > 0 || groupFilter.length > 0 || includeUngrouped || amountMin !== '' || amountMax !== '';
   const clearAdvancedFilters = () => {
-    setCompanyFilter('');
-    setPaymentFilter('');
-    setGroupFilter('all');
-    setAmountFilter('all');
+    setCompanyFilter([]);
+    setPaymentFilter([]);
+    setGroupFilter([]);
+    setIncludeUngrouped(false);
+    setAmountMin('');
+    setAmountMax('');
   };
 
   return (
@@ -393,20 +402,20 @@ export default function ReceiptList({ onSelect, refreshKey }: ReceiptListProps) 
       {(searchText || hasAdvancedFilter) && (
         <div className="active-filter-chips">
           {searchText && <span className="active-filter-chip">検索: {searchText}<button onClick={() => setSearchText('')} aria-label="検索条件を削除">×</button></span>}
-          {companyFilter && <span className="active-filter-chip">{companies.find((c) => c.id === companyFilter)?.name || companyFilter}<button onClick={() => setCompanyFilter('')} aria-label="会社条件を削除">×</button></span>}
-          {paymentFilter && <span className="active-filter-chip">{paymentFilter}<button onClick={() => setPaymentFilter('')} aria-label="支払い方法条件を削除">×</button></span>}
-          {groupFilter !== 'all' && <span className="active-filter-chip">グループ: {groupFilter === 'with' ? 'あり' : 'なし'}<button onClick={() => setGroupFilter('all')} aria-label="グループ条件を削除">×</button></span>}
-          {amountFilter !== 'all' && <span className="active-filter-chip">金額: {amountFilter === 'entered' ? '入力済み' : '未入力'}<button onClick={() => setAmountFilter('all')} aria-label="金額条件を削除">×</button></span>}
+          {companyFilter.length > 0 && <span className="active-filter-chip">会社: {companyFilter.map((id) => companies.find((c) => c.id === id)?.name || id).join('・')}<button onClick={() => setCompanyFilter([])} aria-label="会社条件を削除">×</button></span>}
+          {paymentFilter.length > 0 && <span className="active-filter-chip">支払い: {paymentFilter.join('・')}<button onClick={() => setPaymentFilter([])} aria-label="支払い方法条件を削除">×</button></span>}
+          {(groupFilter.length > 0 || includeUngrouped) && <span className="active-filter-chip">グループ: {[...groupFilter, ...(includeUngrouped ? ['未設定'] : [])].join('・')}<button onClick={() => { setGroupFilter([]); setIncludeUngrouped(false); }} aria-label="グループ条件を削除">×</button></span>}
+          {(amountMin !== '' || amountMax !== '') && <span className="active-filter-chip">金額: {amountMin || '0'}〜{amountMax || '上限なし'}円<button onClick={() => { setAmountMin(''); setAmountMax(''); }} aria-label="金額条件を削除">×</button></span>}
           {(searchText || hasAdvancedFilter) && <button className="clear-filters-button" onClick={() => { setSearchText(''); clearAdvancedFilters(); }}>すべて解除</button>}
         </div>
       )}
 
       {showAdvancedFilters && (
         <div className="advanced-filter-panel">
-          <label>会社<select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)}><option value="">すべて</option>{companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-          <label>支払い方法<select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}><option value="">すべて</option>{paymentNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
-          <label>グループ<select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value as GroupFilterType)}><option value="all">すべて</option><option value="with">設定あり</option><option value="without">設定なし</option></select></label>
-          <label>金額<select value={amountFilter} onChange={(e) => setAmountFilter(e.target.value as AmountFilterType)}><option value="all">すべて</option><option value="entered">入力済み</option><option value="empty">未入力</option></select></label>
+          <label>会社（複数選択）<select multiple value={companyFilter} onChange={(e) => setCompanyFilter(Array.from(e.target.selectedOptions, (o) => o.value))}>{companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+          <label>支払い方法（複数選択）<select multiple value={paymentFilter} onChange={(e) => setPaymentFilter(Array.from(e.target.selectedOptions, (o) => o.value))}>{paymentNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+          <label>グループ（複数選択）<select multiple value={groupFilter} onChange={(e) => setGroupFilter(Array.from(e.target.selectedOptions, (o) => o.value))}>{Array.from(new Set(allReceipts.map((r) => r.groupName).filter((name): name is string => !!name))).sort().map((name) => <option key={name} value={name}>{name}</option>)}</select><span className="filter-checkbox"><input type="checkbox" checked={includeUngrouped} onChange={(e) => setIncludeUngrouped(e.target.checked)} /> グループ未設定を含む</span></label>
+          <label>金額範囲（円）<div className="amount-range-inputs"><input type="number" min="0" placeholder="下限" value={amountMin} onChange={(e) => setAmountMin(e.target.value)} /><span>〜</span><input type="number" min="0" placeholder="上限" value={amountMax} onChange={(e) => setAmountMax(e.target.value)} /></div></label>
         </div>
       )}
 
