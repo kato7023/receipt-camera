@@ -329,6 +329,15 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
     }
   };
 
+  const getOcrStateLabel = (state: Receipt['ocrState']) => {
+    switch (state) {
+      case 'done': return '取得済み';
+      case 'pending': return '取得待ち';
+      case 'error': return '取得エラー';
+      default: return '未取得';
+    }
+  };
+
   if (!currentReceipt) {
     return (
       <div className="receipt-detail-overlay" onClick={onClose}>
@@ -469,6 +478,37 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
             )}
           </div>
         </div>
+
+        {/* freee OCR情報（ユーザー入力のメモとは分離して表示） */}
+        <section className="detail-ocr" aria-label="freee OCR情報">
+          <div className="detail-ocr-header">
+            <h3>freee OCR情報</h3>
+            <span className={`detail-ocr-state ${currentReceipt.ocrState || 'none'}`}>
+              {getOcrStateLabel(currentReceipt.ocrState)}
+            </span>
+          </div>
+          <div className="detail-ocr-grid">
+            <div className="detail-ocr-item">
+              <span className="detail-ocr-label">支払先</span>
+              <span className="detail-ocr-value">{currentReceipt.ocrPartnerName || '未取得'}</span>
+            </div>
+            <div className="detail-ocr-item">
+              <span className="detail-ocr-label">T番号</span>
+              <span className="detail-ocr-value">{currentReceipt.ocrRegistrationNumber || '未取得'}</span>
+            </div>
+            <div className="detail-ocr-item">
+              <span className="detail-ocr-label">OCR金額</span>
+              <span className="detail-ocr-value">{currentReceipt.ocrAmount !== null && currentReceipt.ocrAmount !== undefined ? `¥${currentReceipt.ocrAmount.toLocaleString()}` : '未取得'}</span>
+            </div>
+            <div className="detail-ocr-item">
+              <span className="detail-ocr-label">OCR発行日</span>
+              <span className="detail-ocr-value">{currentReceipt.ocrIssueDate || '未取得'}</span>
+            </div>
+          </div>
+          {currentReceipt.ocrFetchedAt && (
+            <span className="detail-ocr-fetched-at">最終取得: {formatDate(currentReceipt.ocrFetchedAt)}</span>
+          )}
+        </section>
 
         {/* 画像 */}
         <div className="detail-image-container">
