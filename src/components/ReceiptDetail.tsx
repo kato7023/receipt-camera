@@ -54,7 +54,9 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   const groupInputRef = useRef<HTMLInputElement>(null);
   const amountInputRef = useRef<HTMLInputElement>(null);
   const viewerPointersRef = useRef(new Map<number, { x: number; y: number }>());
-  const pinchDistanceRef = useRef<number | null>(null);
+  // ピンチ開始時の状態を固定し、イベントごとの倍率積算による跳ねを防ぐ。
+  const pinchStartDistanceRef = useRef<number | null>(null);
+  const pinchStartZoomRef = useRef(1);
   const panStartRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
 
   const resetImageView = useCallback(() => {
@@ -73,11 +75,14 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
   }, [imageZoom]);
 
   const handleViewerPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
     viewerPointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (viewerPointersRef.current.size === 2) {
       const points = Array.from(viewerPointersRef.current.values());
-      pinchDistanceRef.current = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+      const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+      if (distance > 0) {
+        pinchStartDistanceRef.current = distance;
+        pinchStartZoomRef.current = imageZoom;
+      }
       panStartRef.current = null;
     } else if (imageZoom > 1) {
       panStartRef.current = { x: event.clientX, y: event.clientY, panX: imagePan.x, panY: imagePan.y };
@@ -88,10 +93,10 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
     if (!viewerPointersRef.current.has(event.pointerId)) return;
     viewerPointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     const points = Array.from(viewerPointersRef.current.values());
-    if (points.length === 2 && pinchDistanceRef.current) {
+    if (points.length === 2 && pinchStartDistanceRef.current) {
       const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
-      setImageZoom((current) => Math.min(4, Math.max(1, current * (distance / pinchDistanceRef.current!))));
-      pinchDistanceRef.current = distance;
+      const nextZoom = pinchStartZoomRef.current * (distance / pinchStartDistanceRef.current);
+      setImageZoom(Math.min(4, Math.max(1, nextZoom)));
     } else if (panStartRef.current && imageZoom > 1) {
       setImagePan({
         x: panStartRef.current.panX + event.clientX - panStartRef.current.x,
@@ -102,8 +107,20 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
 
   const handleViewerPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
     viewerPointersRef.current.delete(event.pointerId);
-    if (viewerPointersRef.current.size < 2) pinchDistanceRef.current = null;
+    if (viewerPointersRef.current.size < 2) pinchStartDistanceRef.current = null;
     if (viewerPointersRef.current.size === 0) panStartRef.current = null;
+  };
+
+  const handleViewerPointerCancel = (event: React.PointerEvent<HTMLDivElement>) => {
+    viewerPointersRef.current.delete(event.pointerId);
+    pinchStartDistanceRef.current = null;
+    panStartRef.current = null;
+  };
+
+  const handleViewerLostPointerCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+    viewerPointersRef.current.delete(event.pointerId);
+    pinchStartDistanceRef.current = null;
+    panStartRef.current = null;
   };
 
   const handleViewerWheel = (event: React.WheelEvent<HTMLDivElement>) => {
@@ -627,7 +644,8 @@ export default function ReceiptDetail({ receipt, onClose, onUpdate }: ReceiptDet
             onPointerDown={handleViewerPointerDown}
             onPointerMove={handleViewerPointerMove}
             onPointerUp={handleViewerPointerUp}
-            onPointerCancel={handleViewerPointerUp}
+            onPointerCancel={handleViewerPointerCancel}
+            onLostPointerCapture={handleViewerLostPointerCapture}
           >
             <img
               src={imageUrl}
